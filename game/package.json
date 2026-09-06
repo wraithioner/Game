@@ -1,0 +1,15 @@
+{
+  "name": "ringtrue",
+  "private": true,
+  "type": "module",
+  "description": "Ringtrue - a one-tap precision-timing game with a daily seeded challenge. No build step for the game itself; this file exists to mark ES module scope for Node's test runner and to hold the optional Playwright dev dependency used by qa/ scripts.",
+  "scripts": {
+    "test": "node --test",
+    "qa:smoke": "node qa/browser-check.mjs",
+    "qa:skilled": "node qa/skilled-play.mjs",
+    "qa:network": "node qa/network-check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}

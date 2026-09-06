@@ -1,0 +1,366 @@
+/* Ringtrue visual design system — docs/GAME_DESIGN.md §3–4.
+   Light palette on bare :root; dark overrides guarded so an explicit
+   data-theme always wins over the OS setting in either direction. */
+
+:root {
+  --bg: #faf8f5;
+  --surface: #ffffff;
+  --text: #2b2b2e;
+  --text-muted: #6b6b70;
+  --ring: #d8d3ca;
+  --accent-fair: #3d6fb4;
+  --accent-true: #c98a1c;
+  --accent-primary: #2b2b2e;
+  --accent-primary-text: #faf8f5;
+  --border: #e4dfd6;
+  --danger-soft: #8a5a3a;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 14px;
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 40px;
+
+  --motion-fast: 150ms;
+  --motion-medium: 300ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15151a;
+    --surface: #1d1d23;
+    --text: #f2f0ec;
+    --text-muted: #a3a3aa;
+    --ring: #39393f;
+    --accent-fair: #6fa8e0;
+    --accent-true: #e0ac4b;
+    --accent-primary: #f2f0ec;
+    --accent-primary-text: #15151a;
+    --border: #2e2e35;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15151a;
+  --surface: #1d1d23;
+  --text: #f2f0ec;
+  --text-muted: #a3a3aa;
+  --ring: #39393f;
+  --accent-fair: #6fa8e0;
+  --accent-true: #e0ac4b;
+  --accent-primary: #f2f0ec;
+  --accent-primary-text: #15151a;
+  --border: #2e2e35;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The UA stylesheet's [hidden] rule ties in specificity with .screen's own
+   display:flex below, and loses the cascade tie-break in some engines - make
+   hidden screens unconditionally hidden regardless of their own display value. */
+[hidden] {
+  display: none !important;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) var(--space-3) var(--space-4);
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+#screen-journal,
+#screen-settings {
+  justify-content: flex-start;
+  padding-top: var(--space-4);
+}
+
+.wordmark {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.today-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  text-align: center;
+  margin-bottom: var(--space-2);
+}
+
+.eyebrow {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.today-status {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 28px;
+  cursor: pointer;
+  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+  touch-action: manipulation;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: var(--accent-primary-text);
+  width: 100%;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin-top: var(--space-1);
+}
+
+.btn-tertiary {
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.home-stats {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.stat-pill {
+  font-size: 0.85rem;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.stat-pill-button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: var(--space-1);
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.corner-right {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.corner-left {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+}
+
+#screen-run {
+  padding: var(--space-2);
+  justify-content: center;
+}
+
+.hud {
+  position: absolute;
+  top: var(--space-2);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+#canvas {
+  width: min(90vw, 420px);
+  height: min(90vw, 420px);
+  touch-action: none;
+}
+
+.run-hint {
+  position: absolute;
+  bottom: var(--space-4);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+#screen-result {
+  justify-content: center;
+  text-align: center;
+}
+
+#result-title {
+  font-size: 1.6rem;
+  margin-bottom: var(--space-1);
+}
+
+#result-detail {
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.tick-strip {
+  font-size: 1.4rem;
+  letter-spacing: 0.15em;
+  margin: var(--space-2) 0;
+}
+
+.result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  max-width: 320px;
+  margin-top: var(--space-2);
+}
+
+.share-toast {
+  margin-top: var(--space-2);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.stat-list {
+  width: 100%;
+  max-width: 360px;
+  margin: var(--space-3) 0 0;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.stat-row dt {
+  color: var(--text-muted);
+}
+
+.stat-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 360px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 1rem;
+}
+
+.setting-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+}
+
+.theme-fieldset {
+  width: 100%;
+  max-width: 360px;
+  border: none;
+  padding: var(--space-2) 0 0;
+  margin: 0;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.theme-fieldset legend {
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-bottom: var(--space-1);
+}
+
+/* Colorblind-safe mode: strengthens shape/pattern redundancy already present
+   by default (docs/GAME_DESIGN.md §3.2, §4) with an outline on the canvas
+   region and higher-contrast band edges - the actual redundant encoding
+   (band width difference, distinct glyph shapes in the share card) is
+   always on regardless of this toggle. */
+body.colorblind-safe #canvas {
+  outline: 2px solid var(--text-muted);
+  outline-offset: 4px;
+}
+
+/* Reduced motion: disable the pulse/scale transitions used elsewhere in the
+   UI shell. The canvas's own feedback pulse is separately gated in render.js
+   using the same setting, since it isn't a CSS transition. */
+body.reduce-motion * {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

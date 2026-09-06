@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#15151a" />
+  <meta name="description" content="Ringtrue - a one-tap precision timing game with a daily seeded challenge for every player in the world." />
+  <title>Ringtrue</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <section id="screen-home" class="screen" data-screen="home">
+      <button id="open-settings" class="icon-btn corner-right" aria-label="Settings" type="button">⚙</button>
+      <h1 class="wordmark">Ringtrue</h1>
+
+      <div class="today-card">
+        <p class="eyebrow" id="ring-number">Ring —</p>
+        <p class="today-status" id="today-status">One ring. Every player. Once a day.</p>
+        <button id="play-daily" class="btn btn-primary" type="button">Play Today's Ring</button>
+      </div>
+
+      <button id="play-practice" class="btn btn-secondary" type="button">Practice</button>
+
+      <div class="home-stats">
+        <span id="streak-flame" class="stat-pill" hidden>🔥 <span id="streak-count">0</span></span>
+        <button id="open-journal" class="stat-pill stat-pill-button" type="button">Journal</button>
+      </div>
+    </section>
+
+    <section id="screen-run" class="screen" data-screen="run" hidden>
+      <button id="run-back" class="icon-btn corner-left" aria-label="Back to home" type="button">×</button>
+      <div class="hud">
+        <span id="hud-lap"></span>
+        <span id="hud-combo"></span>
+      </div>
+      <canvas id="canvas" width="640" height="640" aria-label="Tap when the pointer is inside the glowing band"></canvas>
+      <p class="run-hint" id="run-hint" hidden>Tap when the pointer glows</p>
+    </section>
+
+    <section id="screen-result" class="screen" data-screen="result" hidden>
+      <h2 id="result-title"></h2>
+      <p id="result-detail"></p>
+      <p class="tick-strip" id="result-ticks" aria-hidden="true"></p>
+      <div class="result-actions">
+        <button id="share-btn" class="btn btn-primary" type="button">Share Result</button>
+        <button id="result-again" class="btn btn-secondary" type="button">Play Again</button>
+        <button id="result-home" class="btn btn-tertiary" type="button">Home</button>
+      </div>
+      <p class="share-toast" id="share-toast" role="status" hidden></p>
+    </section>
+
+    <section id="screen-journal" class="screen" data-screen="journal" hidden>
+      <button class="icon-btn corner-left back-home" aria-label="Back to home" type="button">×</button>
+      <h2>Precision Journal</h2>
+      <dl class="stat-list">
+        <div class="stat-row"><dt>Median timing offset</dt><dd id="stat-median">—</dd></div>
+        <div class="stat-row"><dt>Consistency</dt><dd id="stat-consistency">—</dd></div>
+        <div class="stat-row"><dt>Longest run</dt><dd id="stat-longest">—</dd></div>
+        <div class="stat-row"><dt>Total Perfects</dt><dd id="stat-perfects">—</dd></div>
+        <div class="stat-row"><dt>Runs played</dt><dd id="stat-runs">—</dd></div>
+        <div class="stat-row"><dt>Current streak</dt><dd id="stat-streak">—</dd></div>
+      </dl>
+    </section>
+
+    <section id="screen-settings" class="screen" data-screen="settings" hidden>
+      <button class="icon-btn corner-left back-home" aria-label="Back to home" type="button">×</button>
+      <h2>Settings</h2>
+
+      <label class="setting-row">
+        <span>Sound</span>
+        <input type="checkbox" id="setting-sound" />
+      </label>
+      <label class="setting-row">
+        <span>Haptics</span>
+        <input type="checkbox" id="setting-haptics" />
+      </label>
+      <label class="setting-row">
+        <span>Reduce motion</span>
+        <input type="checkbox" id="setting-motion" />
+      </label>
+      <label class="setting-row">
+        <span>Colorblind-safe mode</span>
+        <input type="checkbox" id="setting-colorblind" />
+      </label>
+
+      <fieldset class="theme-fieldset">
+        <legend>Theme</legend>
+        <label><input type="radio" name="theme" value="auto" /> Auto</label>
+        <label><input type="radio" name="theme" value="light" /> Light</label>
+        <label><input type="radio" name="theme" value="dark" /> Dark</label>
+      </fieldset>
+    </section>
+
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "Ringtrue",
+  "short_name": "Ringtrue",
+  "description": "A one-tap precision timing game with a daily seeded challenge for every player in the world.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#15151a",
+  "theme_color": "#15151a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
