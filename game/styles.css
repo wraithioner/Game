@@ -9,7 +9,10 @@
   --text-muted: #6b6b70;
   --ring: #d8d3ca;
   --accent-fair: #3d6fb4;
-  --accent-true: #c98a1c;
+  /* Deepened from the original #c98a1c: that amber failed WCAG AA non-text
+     contrast (1.97:1 against --ring, 2.78:1 against --bg; both need >=3:1).
+     #8f6214 clears both (3.6:1 and 5.1:1) while staying in the same hue. */
+  --accent-true: #8f6214;
   --accent-primary: #2b2b2e;
   --accent-primary-text: #faf8f5;
   --border: #e4dfd6;

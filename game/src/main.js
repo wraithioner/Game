@@ -4,7 +4,7 @@
 // above stay pure and unit-testable.
 
 import { RingRun, angleAt, angularDiff } from './game.js';
-import { dailySeed, practiceSeed, utcDateString } from './rng.js';
+import { dailySeed, practiceSeed, utcDateString, hashStringToSeed } from './rng.js';
 import {
   loadSettings,
   saveSettings,
@@ -20,6 +20,7 @@ import { buildShareText, shareResult, tickStripFor } from './share.js';
 import { playCue, unlockAudio } from './audio.js';
 import { drawFrame } from './render.js';
 import { listenForTap } from './input.js';
+import { track, getRecentEvents } from './analytics.js';
 
 const DAILY_LAP_CAP = 20;
 const FEEDBACK_PULSE_MS = 260;
@@ -71,31 +72,28 @@ function applySettingsToDom() {
   });
 }
 
-function currentTheme() {
-  if (settings.theme !== 'auto') return settings.theme;
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
-}
-
 function wireSettings() {
   document.getElementById('setting-sound').addEventListener('change', (e) => {
     settings = { ...settings, soundEnabled: e.target.checked };
     saveSettings(settings);
+    track('settings_changed', { settingName: 'soundEnabled', newValue: e.target.checked });
   });
   document.getElementById('setting-haptics').addEventListener('change', (e) => {
     settings = { ...settings, hapticsEnabled: e.target.checked };
     saveSettings(settings);
+    track('settings_changed', { settingName: 'hapticsEnabled', newValue: e.target.checked });
   });
   document.getElementById('setting-motion').addEventListener('change', (e) => {
     settings = { ...settings, reduceMotion: e.target.checked };
     saveSettings(settings);
     applySettingsToDom();
+    track('settings_changed', { settingName: 'reduceMotion', newValue: e.target.checked });
   });
   document.getElementById('setting-colorblind').addEventListener('change', (e) => {
     settings = { ...settings, colorblindSafe: e.target.checked };
     saveSettings(settings);
     applySettingsToDom();
+    track('settings_changed', { settingName: 'colorblindSafe', newValue: e.target.checked });
   });
   document.querySelectorAll('input[name="theme"]').forEach((el) => {
     el.addEventListener('change', () => {
@@ -103,6 +101,7 @@ function wireSettings() {
         settings = { ...settings, theme: el.value };
         saveSettings(settings);
         applySettingsToDom();
+        track('settings_changed', { settingName: 'theme', newValue: el.value });
       }
     });
   });
@@ -112,6 +111,10 @@ function wireSettings() {
 
 function todayKey() {
   return utcDateString(new Date());
+}
+
+function dayIndexForToday() {
+  return Math.floor((Date.parse(todayKey() + 'T00:00:00Z') - Date.parse('2026-01-01T00:00:00Z')) / 86400000) + 1;
 }
 
 function dailyResultKey() {
@@ -138,8 +141,7 @@ function saveTodaysDailyResult(result) {
 }
 
 function refreshHomeScreen() {
-  const dayIndex = Math.floor((Date.parse(todayKey() + 'T00:00:00Z') - Date.parse('2026-01-01T00:00:00Z')) / 86400000) + 1;
-  document.getElementById('ring-number').textContent = `Ring #${dayIndex}`;
+  document.getElementById('ring-number').textContent = `Ring #${dayIndexForToday()}`;
 
   const existing = loadTodaysDailyResult();
   const statusEl = document.getElementById('today-status');
@@ -181,6 +183,7 @@ function refreshJournalScreen() {
 
 let activeRun = null;
 let lapStartPerfMs = null;
+let runStartPerfMs = null;
 let rafId = null;
 let unsubscribeInput = null;
 let lastFeedback = null; // { type, atPerfMs }
@@ -204,9 +207,14 @@ function startRun(mode) {
   const seed = mode === 'daily' ? dailySeed(new Date()) : practiceSeed();
   activeRun = new RingRun({ seed, mode, lapCap: mode === 'daily' ? DAILY_LAP_CAP : null });
   lapStartPerfMs = performance.now();
+  runStartPerfMs = lapStartPerfMs;
   lastFeedback = null;
   showFirstRunHint = !hasPlayedEver;
   document.getElementById('run-hint').hidden = !showFirstRunHint;
+
+  track('run_started', { mode });
+  if (mode === 'daily') track('daily_challenge_started', { dayIndex: dayIndexForToday() });
+  if (showFirstRunHint) track('first_run_demo_seen', {});
 
   showScreen('run');
   updateHud();
@@ -236,7 +244,6 @@ function renderLoop() {
   drawFrame(ctx, canvasLogicalSize, {
     lap: activeRun.lap,
     angle,
-    theme: currentTheme(),
     reduceMotion: settings.reduceMotion,
     feedback,
   });
@@ -250,9 +257,13 @@ function handleTap(tSeconds) {
   if (!activeRun || activeRun.status !== 'active') return;
   unlockAudio();
 
-  const priorLapIndex = activeRun.lapIndex;
+  const isPlayersFirstEverLap = stats.totalRuns === 0 && activeRun.lapIndex === 0;
   const outcome = activeRun.registerTap(tSeconds);
   if (!outcome) return;
+
+  if (isPlayersFirstEverLap) {
+    track('first_lap_result', { result: outcome.result, offsetMs: outcome.offsetMs });
+  }
 
   playCue(outcome.result, settings);
   lastFeedback = { type: outcome.result, atPerfMs: performance.now() };
@@ -266,7 +277,6 @@ function handleTap(tSeconds) {
     lapStartPerfMs = performance.now();
     updateHud();
   } else {
-    void priorLapIndex;
     setTimeout(() => finishRun(outcome), RESULT_TRANSITION_DELAY_MS);
   }
 }
@@ -316,7 +326,15 @@ function finishRun(outcome) {
   saveStats(stats);
   hasPlayedEver = true;
 
+  track('run_ended', {
+    mode: run.mode,
+    durationMs: Math.round(performance.now() - runStartPerfMs),
+    lapsSurvived: run.lapIndex,
+    resultSequence: run.results.join(','),
+  });
+
   if (run.mode === 'daily') {
+    const previousStreak = streak;
     streak = updateStreakOnDailyAttempt(streak, todayKey());
     saveStreak(streak);
     saveTodaysDailyResult({
@@ -324,7 +342,22 @@ function finishRun(outcome) {
       lapsCompleted: run.lapIndex,
       completed: run.completed,
       score: run.score,
+      maxCombo: run.maxCombo,
     });
+
+    track('daily_challenge_completed', {
+      dayIndex: dayIndexForToday(),
+      completed: run.completed,
+      lapsCompleted: run.lapIndex,
+    });
+
+    if (streak.count === 1 && previousStreak.count > 1) {
+      track('streak_broken', { streakLengthAtBreak: previousStreak.count });
+    } else if (streak.freezesAvailable < previousStreak.freezesAvailable) {
+      track('streak_freeze_used', { streakLength: streak.count });
+    } else if (streak.count > previousStreak.count) {
+      track('streak_extended', { streakLength: streak.count });
+    }
   }
 
   renderResultScreen(run);
@@ -333,14 +366,9 @@ function finishRun(outcome) {
 }
 
 function renderResultScreen(run) {
-  const title =
-    run.mode === 'daily' && run.completed
-      ? 'Ring cleared!'
-      : run.mode === 'daily'
-      ? `${run.lapIndex} laps`
-      : `${run.lapIndex} laps`;
+  const title = run.completed ? 'Ring cleared!' : `${run.lapIndex} laps`;
   document.getElementById('result-title').textContent = title;
-  document.getElementById('result-detail').textContent = `Score ${run.score} · best combo ×${run.combo}`;
+  document.getElementById('result-detail').textContent = `Score ${run.score} · best combo ×${run.maxCombo}`;
   document.getElementById('result-ticks').textContent = tickStripFor(run.results);
 
   const againBtn = document.getElementById('result-again');
@@ -355,7 +383,11 @@ function renderResultScreen(run) {
       streakCount: streak.count,
       utcDateString: todayKey(),
     });
+    track('share_card_generated', {});
     const outcome = await shareResult(text);
+    if (outcome === 'native-share' || outcome === 'clipboard') {
+      track('share_card_shared', { destination: outcome });
+    }
     const toast = document.getElementById('share-toast');
     toast.hidden = false;
     toast.textContent =
@@ -378,7 +410,7 @@ function showStoredDailyResult(stored) {
     lapIndex: stored.lapsCompleted,
     completed: stored.completed,
     score: stored.score,
-    combo: 1,
+    maxCombo: stored.maxCombo ?? 1, // older cached results predate maxCombo tracking
   });
   showScreen('result');
 }
@@ -428,6 +460,24 @@ wireSettings();
 refreshHomeScreen();
 showScreen('home');
 
+track('session_start', {
+  isPwaInstall: window.matchMedia && window.matchMedia('(display-mode: standalone)').matches,
+  referrerType: document.referrer ? 'external' : 'direct',
+  deviceTier: (navigator.hardwareConcurrency || 0) <= 4 ? 'low-or-unknown' : 'higher',
+});
+
+window.addEventListener('beforeinstallprompt', () => track('pwa_install_prompt_shown', {}));
+window.addEventListener('appinstalled', () => track('pwa_install_accepted', {}));
+
+window.addEventListener('error', (event) => {
+  const detail = event.error ? event.error.stack || event.error.message : event.message;
+  track('error_boundary_hit', { errorType: 'error', stackHash: hashStringToSeed(String(detail)) });
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const detail = event.reason && event.reason.stack ? event.reason.stack : String(event.reason);
+  track('error_boundary_hit', { errorType: 'unhandledrejection', stackHash: hashStringToSeed(detail) });
+});
+
 // Read-only debug hook for automated QA (docs/PRODUCT_PLAN.md - Testing
 // Strategy). Only attached behind an explicit query flag, never in normal
 // play, and exposes no write access - this is a single-player, offline,
@@ -437,6 +487,7 @@ if (new URLSearchParams(location.search).has('debug')) {
   window.__ringtrueDebug = {
     getRun: () => activeRun,
     getLapStartPerfMs: () => lapStartPerfMs,
+    getRecentEvents,
     // Coarse numeric search for a tap time within the next few laps that
     // lands dead-center - used only by automated QA to simulate skilled play
     // deterministically, never by the game itself.

@@ -7,7 +7,8 @@
     "test": "node --test",
     "qa:smoke": "node qa/browser-check.mjs",
     "qa:skilled": "node qa/skilled-play.mjs",
-    "qa:network": "node qa/network-check.mjs"
+    "qa:network": "node qa/network-check.mjs",
+    "qa:analytics": "node qa/analytics-check.mjs"
   },
   "devDependencies": {
     "playwright": "^1.47.0"

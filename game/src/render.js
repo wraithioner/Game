@@ -5,27 +5,24 @@
 
 import { TAU } from './game.js';
 
-const COLORS = {
-  light: {
-    bg: '#faf8f5',
-    ring: '#d8d3ca',
-    pointer: '#2b2b2e',
-    fair: '#3d6fb4', // blue - colorblind-safe pairing with amber
-    true: '#c98a1c', // amber
-    text: '#2b2b2e',
-  },
-  dark: {
-    bg: '#15151a',
-    ring: '#39393f',
-    pointer: '#f2f0ec',
-    fair: '#6fa8e0',
-    true: '#e0ac4b',
-    text: '#f2f0ec',
-  },
-};
-
-export function getPalette(theme) {
-  return COLORS[theme] || COLORS.light;
+// Colors are read live from the page's own CSS custom properties (styles.css)
+// rather than duplicated here - two sources of truth for the same palette is
+// exactly how a light-mode contrast bug once shipped unnoticed (a canvas
+// color was fixed in styles.css but never updated here). Reading the
+// computed values means the canvas always matches whatever the CSS cascade
+// currently resolves to (theme override, prefers-color-scheme, or a future
+// palette change) with nothing to keep in sync by hand.
+export function getPalette() {
+  const styles = getComputedStyle(document.documentElement);
+  const token = (name) => styles.getPropertyValue(name).trim();
+  return {
+    bg: token('--bg'),
+    ring: token('--ring'),
+    pointer: token('--accent-primary'),
+    fair: token('--accent-fair'),
+    true: token('--accent-true'),
+    text: token('--text'),
+  };
 }
 
 /**
@@ -33,11 +30,11 @@ export function getPalette(theme) {
  * pointer, and (for Perfect/Miss) a brief feedback pulse.
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {{lap: object, angle: number, theme: 'light'|'dark', reduceMotion: boolean, feedback: {type: string, age: number}|null}} state
+ * @param {{lap: object, angle: number, reduceMotion: boolean, feedback: {type: string, age: number}|null}} state
  */
 export function drawFrame(ctx, canvasSize, state) {
-  const { lap, angle, theme, reduceMotion, feedback } = state;
-  const palette = getPalette(theme);
+  const { lap, angle, reduceMotion, feedback } = state;
+  const palette = getPalette();
   const cx = canvasSize / 2;
   const cy = canvasSize / 2;
   const radius = canvasSize * 0.36;

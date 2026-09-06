@@ -67,3 +67,23 @@ test('reaching a 7-day milestone earns exactly one freeze, once', () => {
   streak = updateStreakOnDailyAttempt(streak, '2026-01-08'); // count -> 8
   assert.equal(streak.freezesAvailable, 1);
 });
+
+test('rebuilding a fresh streak back up to a milestone re-earns the freeze after an earlier streak broke at that same milestone', () => {
+  // Reach the 7-day milestone once, spend the freeze it grants.
+  let streak = { count: 6, lastCompletedUtcDate: '2026-01-06', freezesAvailable: 0, freezesEarnedAtMilestones: [] };
+  streak = updateStreakOnDailyAttempt(streak, '2026-01-07'); // count -> 7, freeze earned
+  assert.equal(streak.freezesAvailable, 1);
+  streak = { ...streak, freezesAvailable: 0 }; // simulate spending it
+
+  // Now the streak breaks entirely (a gap with no freeze available).
+  streak = updateStreakOnDailyAttempt(streak, '2026-01-10');
+  assert.equal(streak.count, 1, 'streak should have reset to 1');
+  assert.deepEqual(streak.freezesEarnedAtMilestones, [], 'milestone history should reset with the streak');
+
+  // Build a brand-new streak back up to 7 days.
+  for (let day = 11; day <= 16; day++) {
+    streak = updateStreakOnDailyAttempt(streak, `2026-01-${day}`);
+  }
+  assert.equal(streak.count, 7);
+  assert.equal(streak.freezesAvailable, 1, 'the milestone must re-grant a freeze on the new streak, not be silently withheld');
+});

@@ -124,6 +124,7 @@ export class RingRun {
     this.completed = false; // true only if a daily run reached its lap cap without missing
     this.score = 0;
     this.combo = 1;
+    this.maxCombo = 1;
     this.results = [];
     this.offsets = [];
     this.lap = createLap(this.seed, 0);
@@ -153,6 +154,7 @@ export class RingRun {
     this.offsets.push(offsetMs);
     if (result === 'perfect') {
       this.combo += 1;
+      this.maxCombo = Math.max(this.maxCombo, this.combo);
     } else {
       // Fair softens the combo rather than zeroing it (GAME_DESIGN.md §1.5) -
       // only a Miss should feel like it erases a run's progress.
@@ -178,6 +180,7 @@ export class RingRun {
       offsetMs,
       score: this.score,
       combo: this.combo,
+      maxCombo: this.maxCombo,
       lapsCompleted: this.lapIndex,
       status: this.status,
       completed: this.completed,

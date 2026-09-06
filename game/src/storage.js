@@ -127,9 +127,15 @@ export function updateStreakOnDailyAttempt(streak, todayUtcDate) {
 
   let count = streak.count;
   let freezesAvailable = streak.freezesAvailable;
+  // Milestones are tracked relative to the CURRENT streak, not lifetime -
+  // otherwise rebuilding a fresh streak back up to a milestone already
+  // reached (and reset) by an earlier, broken streak would silently
+  // withhold the freeze it should re-earn.
+  let freezesEarnedAtMilestones = streak.freezesEarnedAtMilestones;
 
   if (streak.lastCompletedUtcDate === null) {
     count = 1;
+    freezesEarnedAtMilestones = [];
   } else {
     const gap = daysBetweenUtc(streak.lastCompletedUtcDate, todayUtcDate);
     if (gap === 1) {
@@ -140,13 +146,14 @@ export function updateStreakOnDailyAttempt(streak, todayUtcDate) {
       count += 1;
     } else {
       count = 1; // streak broken
+      freezesEarnedAtMilestones = [];
     }
   }
 
   const milestone = Math.floor(count / 7);
-  const freezesEarnedAtMilestones = [...streak.freezesEarnedAtMilestones];
-  if (milestone > 0 && !freezesEarnedAtMilestones.includes(milestone)) {
-    freezesEarnedAtMilestones.push(milestone);
+  const nextMilestones = [...freezesEarnedAtMilestones];
+  if (milestone > 0 && !nextMilestones.includes(milestone)) {
+    nextMilestones.push(milestone);
     freezesAvailable += 1;
   }
 
@@ -154,6 +161,6 @@ export function updateStreakOnDailyAttempt(streak, todayUtcDate) {
     count,
     lastCompletedUtcDate: todayUtcDate,
     freezesAvailable,
-    freezesEarnedAtMilestones,
+    freezesEarnedAtMilestones: nextMilestones,
   };
 }

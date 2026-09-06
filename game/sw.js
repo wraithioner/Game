@@ -2,7 +2,7 @@
 // Ring, which derives its seed from the device clock) needs zero network
 // access after first load - see docs/PRODUCT_PLAN.md - Technical Architecture.
 
-const CACHE_NAME = 'ringtrue-v1';
+const CACHE_NAME = 'ringtrue-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const APP_SHELL = [
   './src/audio.js',
   './src/share.js',
   './src/storage.js',
+  './src/analytics.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

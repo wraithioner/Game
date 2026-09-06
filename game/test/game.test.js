@@ -128,13 +128,34 @@ test('a Fair result halves the combo instead of resetting it to zero', () => {
   assert.equal(outcome.combo, 4); // floor(8/2)
 });
 
-test('a Perfect increments the combo by one', () => {
+test('maxCombo remembers the peak combo even after a later Fair halves the current combo', () => {
+  const run = new RingRun({ seed: 9, mode: 'practice' });
+  run.combo = 15;
+  run.maxCombo = 15;
+  const center = angleAt(run.lap, 0);
+  const offset = (run.lap.trueHalfWidth + run.lap.fairHalfWidth) / 2;
+  run.lap = { ...run.lap, centerAngle: (center + offset) % TAU };
+  const outcome = run.registerTap(0);
+  assert.equal(outcome.result, 'fair');
+  assert.equal(outcome.combo, 7); // floor(15/2)
+  assert.equal(outcome.maxCombo, 15, 'maxCombo must not regress when the current combo is softened');
+});
+
+test('a Perfect increments the combo by one and advances maxCombo with it', () => {
   const run = new RingRun({ seed: 9, mode: 'practice' });
   run.combo = 3;
+  run.maxCombo = 3;
   run.lap = { ...run.lap, centerAngle: angleAt(run.lap, 0) };
   const outcome = run.registerTap(0);
   assert.equal(outcome.result, 'perfect');
   assert.equal(outcome.combo, 4);
+  assert.equal(outcome.maxCombo, 4);
+});
+
+test('a fresh run starts with combo and maxCombo both at 1', () => {
+  const run = new RingRun({ seed: 1, mode: 'practice' });
+  assert.equal(run.combo, 1);
+  assert.equal(run.maxCombo, 1);
 });
 
 test('daily mode ends (completed) once the lap cap is reached without a miss', () => {

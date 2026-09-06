@@ -11,6 +11,7 @@ npm run qa:smoke      # basic flow: home, practice, a run, share, journal, setti
 npm run qa:skilled    # uses a debug hook (?debug=1) to tap with exact timing and verify
                       # the difficulty ramp, combo system, and the daily 20-lap cap
 npm run qa:network    # checks for failed requests and correct service-worker registration
+npm run qa:analytics  # verifies every docs/PRODUCT_PLAN.md analytics event actually fires
 ```
 
 `BASE_URL` env var overrides the default `http://127.0.0.1:8837`.
