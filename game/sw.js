@@ -1,5 +1,5 @@
 // Minimal offline-first service worker. The whole game (including the Daily
-// Ring, which derives its seed from the device clock) needs zero network
+// Run, which derives its seed from the device clock) needs zero network
 // access after first load - see docs/PRODUCT_PLAN.md - Technical Architecture.
 
 // This placeholder is replaced with the deployed commit SHA by
@@ -10,7 +10,7 @@
 // a human remembering to do it. Local development keeps this literal string,
 // which is fine - a developer testing sw.js changes locally already knows to
 // hard-reload/unregister the service worker between iterations.
-const CACHE_NAME = 'ringtrue-dev';
+const CACHE_NAME = 'swerve-dev';
 const APP_SHELL = [
   './',
   './index.html',

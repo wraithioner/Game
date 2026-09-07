@@ -1,7 +1,7 @@
 {
-  "name": "Ringtrue",
-  "short_name": "Ringtrue",
-  "description": "A one-tap precision timing game with a daily seeded challenge for every player in the world.",
+  "name": "Swerve",
+  "short_name": "Swerve",
+  "description": "A 3-lane endless obstacle dash with a daily seeded course for every player in the world.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

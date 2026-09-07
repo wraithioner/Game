@@ -1,183 +1,317 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLap, angleAt, angularVelocityAt, angularDiff, judge, RingRun, TAU } from '../src/game.js';
+import {
+  createRow,
+  speedAtDistance,
+  SwerveRun,
+  LANES,
+  ROW_SPACING,
+  BASE_SPEED,
+  MAX_SPEED,
+  SPEED_RAMP_DISTANCE,
+  DAILY_DISTANCE_CAP,
+} from '../src/game.js';
 
-test('angularDiff is symmetric and bounded by PI', () => {
-  assert.equal(angularDiff(0.1, 0.1), 0);
-  assert.ok(Math.abs(angularDiff(0, Math.PI) - Math.PI) < 1e-9);
-  assert.ok(Math.abs(angularDiff(0.1, TAU - 0.1) - 0.2) < 1e-9);
-  for (let i = 0; i < 100; i++) {
-    const a = Math.random() * TAU;
-    const b = Math.random() * TAU;
-    const d = angularDiff(a, b);
-    assert.ok(d >= 0 && d <= Math.PI + 1e-9);
-    assert.ok(Math.abs(d - angularDiff(b, a)) < 1e-9);
+test('speedAtDistance ramps from BASE_SPEED to MAX_SPEED and then holds', () => {
+  assert.equal(speedAtDistance(0), BASE_SPEED);
+  assert.equal(speedAtDistance(SPEED_RAMP_DISTANCE), MAX_SPEED);
+  assert.equal(speedAtDistance(SPEED_RAMP_DISTANCE * 10), MAX_SPEED, 'must not exceed the plateau');
+  const mid = speedAtDistance(SPEED_RAMP_DISTANCE / 2);
+  assert.ok(mid > BASE_SPEED && mid < MAX_SPEED);
+});
+
+test('createRow is deterministic for a given seed and row index', () => {
+  const a = createRow(777, 5);
+  const b = createRow(777, 5);
+  assert.deepEqual(a, b);
+});
+
+test('createRow varies by row index and by seed', () => {
+  const a = createRow(1, 0);
+  const b = createRow(1, 1);
+  const c = createRow(2, 0);
+  assert.notDeepEqual(a.lanes, b.lanes);
+  assert.notDeepEqual(a.lanes, c.lanes);
+});
+
+test('createRow always has exactly LANES lanes, each a valid obstacle type', () => {
+  const validTypes = new Set(['empty', 'low', 'high', 'wall']);
+  for (let seed = 0; seed < 200; seed++) {
+    const row = createRow(seed, 0);
+    assert.equal(row.lanes.length, LANES);
+    row.lanes.forEach((t) => assert.ok(validTypes.has(t), `invalid type: ${t}`));
   }
 });
 
-test('angleAt is a deterministic, exact function of time (no accumulation state)', () => {
-  const lap = createLap(777, 5);
-  const a1 = angleAt(lap, 3.14159);
-  const a2 = angleAt(lap, 3.14159);
-  assert.equal(a1, a2);
-  // Evaluating "out of order" (as a real input event might arrive relative to
-  // rendering) must give the same answer as evaluating in order - this is the
-  // whole point of a closed-form angle function instead of frame accumulation.
-  const late = angleAt(lap, 10);
-  const early = angleAt(lap, 1);
-  assert.equal(early, angleAt(lap, 1));
-  assert.equal(late, angleAt(lap, 10));
-});
-
-test('angleAt stays within [0, TAU)', () => {
-  const lap = createLap(1, 0);
-  for (let t = 0; t < 50; t += 0.37) {
-    const a = angleAt(lap, t);
-    assert.ok(a >= 0 && a < TAU, `angle out of range at t=${t}: ${a}`);
-  }
-});
-
-test('the non-periodic sweep is not constant angular velocity', () => {
-  const lap = createLap(1, 0);
-  const v1 = angularVelocityAt(lap, 0.5);
-  const v2 = angularVelocityAt(lap, 4.5);
-  assert.notEqual(v1, v2, 'angular velocity should vary over time, not stay constant');
-});
-
-test('difficulty ramps toward the plateau and then holds', () => {
-  const early = createLap(1, 0);
-  const mid = createLap(1, 10);
-  const plateau = createLap(1, 25);
-  const pastPlateau = createLap(1, 100);
-  assert.ok(early.baseSpeed < mid.baseSpeed);
-  assert.ok(mid.baseSpeed < plateau.baseSpeed);
-  assert.equal(plateau.baseSpeed, pastPlateau.baseSpeed, 'speed must not exceed the plateau');
-  assert.equal(plateau.fairHalfWidth, pastPlateau.fairHalfWidth, 'band width must not exceed the plateau');
-});
-
-test('a tap dead-center at t=0 is always a Perfect', () => {
-  const lap = createLap(1, 0);
-  // Force the tap time to exactly match the target center by construction:
-  // find t such that angleAt(lap, t) === lap.centerAngle at t=0 is unlikely,
-  // so instead verify the inverse property: a diff of 0 always judges Perfect.
-  const result = judge({ ...lap, centerAngle: angleAt(lap, 0) }, 0);
-  assert.equal(result.result, 'perfect');
-  assert.equal(result.diff, 0);
-});
-
-test('a tap far from the target is a Miss', () => {
-  const lap = createLap(1, 0);
-  const farAngle = lap.centerAngle + Math.PI; // maximally far, on the ring
-  // Solve for a t whose angle is far from center: since angleAt(0)=0, offset
-  // the lap's centerAngle instead of searching for t, for a deterministic test.
-  const farLap = { ...lap, centerAngle: (angleAt(lap, 0) + Math.PI) % TAU };
-  const result = judge(farLap, 0);
-  assert.equal(result.result, 'miss');
-});
-
-test('RingRun.registerTap is deterministic: replaying the same tap sequence on the same seed reproduces the same outcomes', () => {
-  function playSequence(seed, taps) {
-    const run = new RingRun({ seed, mode: 'practice' });
-    const outcomes = [];
-    for (const t of taps) {
-      const outcome = run.registerTap(t);
-      outcomes.push(outcome);
-      if (outcome.status === 'ended') break;
-    }
-    return outcomes;
-  }
-
-  const seed = 424242;
-  // Use each lap's own dead-center angle as the "tap angle", converted to a
-  // tap time by scanning - simpler: just tap at fixed times and compare two
-  // independent runs against each other, which is what determinism actually
-  // requires (not that they're all Perfects).
-  const taps = [0.3, 1.1, 2.7, 0.9, 4.2, 1.6, 3.3];
-  const outcomesA = playSequence(seed, taps);
-  const outcomesB = playSequence(seed, taps);
-  assert.deepEqual(outcomesA, outcomesB);
-});
-
-test('two different seeds produce a different daily ring layout', () => {
-  const lapA = createLap(111, 0);
-  const lapB = createLap(222, 0);
-  assert.notEqual(lapA.centerAngle, lapB.centerAngle);
-});
-
-test('a Miss ends the run and further taps are ignored', () => {
-  const run = new RingRun({ seed: 5, mode: 'practice' });
-  // Force a miss deterministically by overriding the lap's center to be
-  // maximally far from wherever t=0 currently points.
-  run.lap = { ...run.lap, centerAngle: (angleAt(run.lap, 0) + Math.PI) % TAU };
-  const first = run.registerTap(0);
-  assert.equal(first.result, 'miss');
-  assert.equal(run.status, 'ended');
-  const second = run.registerTap(1);
-  assert.equal(second, null);
-});
-
-test('a Fair result halves the combo instead of resetting it to zero', () => {
-  const run = new RingRun({ seed: 9, mode: 'practice' });
-  run.combo = 8;
-  // Force a Fair: center offset just outside trueHalfWidth but inside fairHalfWidth.
-  const center = angleAt(run.lap, 0);
-  const offset = (run.lap.trueHalfWidth + run.lap.fairHalfWidth) / 2;
-  run.lap = { ...run.lap, centerAngle: (center + offset) % TAU };
-  const outcome = run.registerTap(0);
-  assert.equal(outcome.result, 'fair');
-  assert.equal(outcome.combo, 4); // floor(8/2)
-});
-
-test('maxCombo remembers the peak combo even after a later Fair halves the current combo', () => {
-  const run = new RingRun({ seed: 9, mode: 'practice' });
-  run.combo = 15;
-  run.maxCombo = 15;
-  const center = angleAt(run.lap, 0);
-  const offset = (run.lap.trueHalfWidth + run.lap.fairHalfWidth) / 2;
-  run.lap = { ...run.lap, centerAngle: (center + offset) % TAU };
-  const outcome = run.registerTap(0);
-  assert.equal(outcome.result, 'fair');
-  assert.equal(outcome.combo, 7); // floor(15/2)
-  assert.equal(outcome.maxCombo, 15, 'maxCombo must not regress when the current combo is softened');
-});
-
-test('a Perfect increments the combo by one and advances maxCombo with it', () => {
-  const run = new RingRun({ seed: 9, mode: 'practice' });
-  run.combo = 3;
-  run.maxCombo = 3;
-  run.lap = { ...run.lap, centerAngle: angleAt(run.lap, 0) };
-  const outcome = run.registerTap(0);
-  assert.equal(outcome.result, 'perfect');
-  assert.equal(outcome.combo, 4);
-  assert.equal(outcome.maxCombo, 4);
-});
-
-test('a fresh run starts with combo and maxCombo both at 1', () => {
-  const run = new RingRun({ seed: 1, mode: 'practice' });
-  assert.equal(run.combo, 1);
-  assert.equal(run.maxCombo, 1);
-});
-
-test('daily mode ends (completed) once the lap cap is reached without a miss', () => {
-  const run = new RingRun({ seed: 3, mode: 'daily', lapCap: 3 });
-  for (let i = 0; i < 3; i++) {
-    run.lap = { ...run.lap, centerAngle: angleAt(run.lap, 0) };
-    const outcome = run.registerTap(0);
-    if (i < 2) {
-      assert.equal(outcome.status, 'active');
-    } else {
-      assert.equal(outcome.status, 'ended');
-      assert.equal(outcome.completed, true);
-      assert.equal(outcome.lapsCompleted, 3);
+test('fairness guarantee: no row ever has all lanes as "wall" (an unavoidable pattern)', () => {
+  // Sweep a large number of seeds and row indices - the weighted random pick
+  // alone would produce all-wall about 0.2^3 = 0.8% of the time, so this
+  // exhaustively checks the deterministic fix-up in createRow actually fires
+  // every time it needs to, not just usually.
+  for (let seed = 0; seed < 500; seed++) {
+    for (let rowIndex = 0; rowIndex < 20; rowIndex++) {
+      const row = createRow(seed, rowIndex);
+      const wallCount = row.lanes.filter((t) => t === 'wall').length;
+      assert.ok(wallCount < LANES, `row (seed=${seed}, index=${rowIndex}) has all lanes blocked: ${row.lanes}`);
     }
   }
 });
 
-test('practice mode has no lap cap', () => {
-  const run = new RingRun({ seed: 3, mode: 'practice' });
-  assert.equal(run.lapCap, null);
+test('row positions increase strictly by ROW_SPACING', () => {
+  const first = createRow(1, 0);
+  const second = createRow(1, 1);
+  assert.equal(second.position - first.position, ROW_SPACING);
+});
+
+test('a fresh run starts centered, running, at distance 0', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  assert.equal(run.lane, 1);
+  assert.equal(run.action, 'running');
+  assert.equal(run.distance, 0);
+  assert.equal(run.status, 'active');
 });
 
 test('constructing a run with an invalid mode throws', () => {
-  assert.throws(() => new RingRun({ seed: 1, mode: 'bogus' }));
+  assert.throws(() => new SwerveRun({ seed: 1, mode: 'bogus' }));
+});
+
+test('moveLeft/moveRight clamp to the lane bounds', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  run.moveLeft();
+  assert.equal(run.lane, 0);
+  run.moveLeft(); // already leftmost
+  assert.equal(run.lane, 0);
+  run.moveRight();
+  run.moveRight();
+  assert.equal(run.lane, 2);
+  run.moveRight(); // already rightmost
+  assert.equal(run.lane, 2);
+});
+
+test('jump and slide are mutually exclusive and time out back to running', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  run.jump();
+  assert.equal(run.action, 'jumping');
+  run.slide(); // ignored while jumping
+  assert.equal(run.action, 'jumping');
+  run.tick(10); // well past JUMP_DURATION
+  assert.equal(run.action, 'running');
+});
+
+/**
+ * Advances a run in small steps (matching how main.js actually drives it,
+ * once per animation frame) until it reaches or passes `targetDistance`, or
+ * ends. A single giant tick() would decay the jump/slide timer using the
+ * whole dt before ever checking a row crossing, which is not how the real
+ * per-frame game loop behaves - small steps are the realistic simulation.
+ */
+function stepUntil(run, targetDistance, step = 1 / 60) {
+  let guard = 0;
+  while (run.status === 'active' && run.distance < targetDistance && guard < 100000) {
+    run.tick(step);
+    guard++;
+  }
+  return run;
+}
+
+test('an empty lane is always survivable regardless of action', () => {
+  // Force a known row layout by testing the pure clears() logic indirectly:
+  // drive a run through a seed/rowIndex combination we've verified is empty
+  // in the player's lane, and confirm no collision.
+  const run = new SwerveRun({ seed: 42, mode: 'practice' });
+  const row = createRow(42, 0);
+  const emptyLane = row.lanes.indexOf('empty');
+  if (emptyLane === -1) return; // this seed's first row has no empty lane; skip rather than flake
+  run.lane = emptyLane;
+  stepUntil(run, ROW_SPACING + 1);
+  assert.equal(run.status, 'active');
+});
+
+test('a "low" obstacle collides unless the player is jumping', () => {
+  // Search seeds for a row with a deterministic 'low' obstacle to test against.
+  let seed = 0;
+  let row;
+  let lane;
+  while (seed < 100) {
+    row = createRow(seed, 0);
+    lane = row.lanes.indexOf('low');
+    if (lane !== -1) break;
+    seed++;
+  }
+  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a low obstacle - test setup problem');
+
+  const hit = new SwerveRun({ seed, mode: 'practice' });
+  hit.lane = lane;
+  stepUntil(hit, ROW_SPACING + 1);
+  assert.equal(hit.status, 'ended');
+
+  // Jump shortly before reaching the row (not at t=0 - JUMP_DURATION is
+  // short, so the jump must actually be in the air when the row arrives).
+  const cleared = new SwerveRun({ seed, mode: 'practice' });
+  cleared.lane = lane;
+  stepUntil(cleared, ROW_SPACING - 1);
+  cleared.jump();
+  stepUntil(cleared, ROW_SPACING + 1);
+  assert.equal(cleared.status, 'active');
+});
+
+test('a "high" obstacle collides unless the player is sliding', () => {
+  let seed = 0;
+  let row;
+  let lane;
+  while (seed < 100) {
+    row = createRow(seed, 0);
+    lane = row.lanes.indexOf('high');
+    if (lane !== -1) break;
+    seed++;
+  }
+  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a high obstacle - test setup problem');
+
+  const hit = new SwerveRun({ seed, mode: 'practice' });
+  hit.lane = lane;
+  stepUntil(hit, ROW_SPACING + 1);
+  assert.equal(hit.status, 'ended');
+
+  const cleared = new SwerveRun({ seed, mode: 'practice' });
+  cleared.lane = lane;
+  stepUntil(cleared, ROW_SPACING - 1);
+  cleared.slide();
+  stepUntil(cleared, ROW_SPACING + 1);
+  assert.equal(cleared.status, 'active');
+});
+
+test('a "wall" obstacle always collides, even while jumping or sliding', () => {
+  let seed = 0;
+  let row;
+  let lane;
+  while (seed < 100) {
+    row = createRow(seed, 0);
+    lane = row.lanes.indexOf('wall');
+    if (lane !== -1) break;
+    seed++;
+  }
+  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a wall obstacle - test setup problem');
+
+  const jumping = new SwerveRun({ seed, mode: 'practice' });
+  jumping.lane = lane;
+  stepUntil(jumping, ROW_SPACING - 1);
+  jumping.jump();
+  stepUntil(jumping, ROW_SPACING + 1);
+  assert.equal(jumping.status, 'ended');
+
+  const sliding = new SwerveRun({ seed, mode: 'practice' });
+  sliding.lane = lane;
+  stepUntil(sliding, ROW_SPACING - 1);
+  sliding.slide();
+  stepUntil(sliding, ROW_SPACING + 1);
+  assert.equal(sliding.status, 'ended');
+});
+
+test('a run that has ended ignores further ticks and input', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  run.status = 'ended';
+  const before = run.distance;
+  run.tick(1);
+  run.moveLeft();
+  run.jump();
+  assert.equal(run.distance, before);
+  assert.equal(run.lane, 1);
+  assert.equal(run.action, 'running');
+});
+
+test('practice mode has no distance cap and does not auto-complete', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  assert.equal(run.distanceCap, null);
+});
+
+test('daily mode ends as "completed" once the distance cap is reached without a collision', () => {
+  const run = new SwerveRun({ seed: 999, mode: 'daily', distanceCap: 50 });
+  // Keep dodging by always moving to a survivable lane before each tick;
+  // simplest robust approach for this test is to advance in small steps and
+  // steer onto an 'empty' or 'low'+jump/'high'+slide lane each time.
+  let dt = 0.05;
+  let guard = 0;
+  while (run.status === 'active' && guard < 100000) {
+    const outcome = run.tick(dt);
+    if (outcome.status !== 'active') break;
+    guard++;
+  }
+  // With such a tiny distanceCap (50, less than one ROW_SPACING of 40... wait
+  // 50 > 40, so exactly one row exists before the cap) and no evasive input,
+  // this run should end in a collision UNLESS lane 1 (center, the start lane)
+  // happens to be empty for row 0 of this seed - assert on whichever
+  // deterministically happens, rather than assuming either outcome.
+  const row0 = createRow(999, 0);
+  if (row0.lanes[1] === 'empty') {
+    assert.equal(run.completed, true);
+  } else {
+    assert.equal(run.status, 'ended');
+  }
+});
+
+test('daily mode completes cleanly when the player successfully dodges every row', () => {
+  const seed = 999;
+  const distanceCap = 130; // covers rows at 40, 80, 120
+  const run = new SwerveRun({ seed, mode: 'daily', distanceCap });
+
+  const dt = 0.02;
+  let guard = 0;
+  while (run.status === 'active' && guard < 1000000) {
+    // Steer just before reaching each row: pick a lane the upcoming row can't
+    // punish regardless of action, or jump/slide appropriately.
+    const upcoming = createRow(seed, Math.floor(run.distance / ROW_SPACING));
+    const safeLane = upcoming.lanes.findIndex((t) => t === 'empty');
+    if (safeLane !== -1) {
+      run.lane = safeLane;
+    } else {
+      const jumpLane = upcoming.lanes.indexOf('low');
+      const slideLane = upcoming.lanes.indexOf('high');
+      if (jumpLane !== -1) {
+        run.lane = jumpLane;
+        run.jump();
+      } else if (slideLane !== -1) {
+        run.lane = slideLane;
+        run.slide();
+      } else {
+        // Only 'wall' remains possible in every lane but one, per the
+        // fairness guarantee - find that one.
+        const openLane = upcoming.lanes.findIndex((t) => t !== 'wall');
+        run.lane = openLane;
+      }
+    }
+    run.tick(dt);
+    guard++;
+  }
+
+  assert.equal(run.status, 'ended');
+  assert.equal(run.completed, true);
+  assert.equal(run.distance, distanceCap);
+});
+
+test('obstaclesCleared increments once per successfully passed row', () => {
+  const seed = 5;
+  const run = new SwerveRun({ seed, mode: 'practice' });
+  const row0 = createRow(seed, 0);
+  const safeLane = row0.lanes.findIndex((t) => t === 'empty');
+  if (safeLane === -1) return; // skip rather than flake if this seed's row 0 has no empty lane
+  run.lane = safeLane;
+  const dt = ROW_SPACING / speedAtDistance(0) + 0.01;
+  run.tick(dt);
+  assert.equal(run.obstaclesCleared, 1);
+});
+
+test('getVisibleRows returns exactly the unresolved rows within viewDistance, and is side-effect-free', () => {
+  const run = new SwerveRun({ seed: 3, mode: 'practice' });
+  const viewDistance = 100;
+  const expectedCount = Math.floor(viewDistance / ROW_SPACING);
+
+  const rows = run.getVisibleRows(viewDistance);
+  assert.equal(rows.length, expectedCount);
+  rows.forEach((row, i) => assert.equal(row.rowIndex, i));
+
+  // Calling it again must return the identical rows - no internal state
+  // should have advanced just from looking ahead.
+  const rowsAgain = run.getVisibleRows(viewDistance);
+  assert.deepEqual(rows, rowsAgain);
+  assert.equal(run.distance, 0);
 });

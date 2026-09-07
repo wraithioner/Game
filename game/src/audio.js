@@ -47,16 +47,18 @@ function playTone(freqs, { duration = 0.12, type = 'sine', gain = 0.15 } = {}) {
 }
 
 const CUES = {
-  fair: () => playTone([523.25], { duration: 0.1, type: 'sine' }), // C5
-  perfect: () => playTone([659.25, 987.77], { duration: 0.12, type: 'triangle' }), // E5, B5 sparkle
-  miss: () => playTone([196], { duration: 0.22, type: 'sine', gain: 0.12 }), // soft low G3, deliberately not harsh
+  jump: () => playTone([440, 660], { duration: 0.09, type: 'triangle', gain: 0.13 }), // quick rising hop
+  slide: () => playTone([330, 220], { duration: 0.12, type: 'sine', gain: 0.12 }), // quick falling whoosh
+  laneChange: () => playTone([500], { duration: 0.04, type: 'sine', gain: 0.06 }), // subtle, since it can fire rapidly
+  collision: () => playTone([180], { duration: 0.24, type: 'sine', gain: 0.12 }), // soft low thud, deliberately not harsh
   milestone: () => playTone([523.25, 659.25, 783.99, 1046.5], { duration: 0.11, type: 'triangle' }), // ascending arpeggio
 };
 
 const HAPTICS = {
-  fair: [10],
-  perfect: [10, 30, 15],
-  miss: [30],
+  jump: [10],
+  slide: [10],
+  laneChange: [6],
+  collision: [30],
   milestone: [15, 40, 15, 40, 15],
 };
 

@@ -1,40 +1,88 @@
-// Pointer input, judged against the RAW input event timestamp rather than
-// "state at the last rendered frame" (docs/GAME_DESIGN.md §1.5, §3.6;
-// docs/PRODUCT_PLAN.md - Technical Architecture). This is the single most
-// important fairness property in the whole build: a dropped or delayed frame
-// must never silently shift a hit judgment.
+// Swipe-gesture and keyboard input for the 3-lane runner. A quick tap (or
+// swipe up) jumps; swipe down slides; swipe left/right changes lanes. Also
+// listens for arrow keys / WASD / space, both for desktop play and as a
+// motor-accessibility alternative to swipe gestures (docs/GAME_DESIGN.md -
+// Eye-Comfort & Accessibility Specification).
+
+const SWIPE_THRESHOLD_PX = 28; // minimum movement to count as a directional swipe rather than a tap
 
 /**
- * Attaches a single-tap listener to `element` and calls `onTap(tSeconds)`
- * with the elapsed time, in seconds, between `lapStartPerfMs` (a
- * performance.now() timestamp) and the event's own high-resolution timestamp.
- *
+ * @param {HTMLElement} element - the element to listen on (the whole Run screen)
+ * @param {{onLeft: Function, onRight: Function, onJump: Function, onSlide: Function}} actions
  * @returns {() => void} an unsubscribe function
  */
-export function listenForTap(element, getLapStartPerfMs, onTap) {
+export function listenForGestures(element, actions) {
+  let startX = null;
+  let startY = null;
+
   function handlePointerDown(event) {
-    // Ignore multi-touch/secondary pointers - the whole game is one tap.
     if (event.isPrimary === false) return;
+    startX = event.clientX;
+    startY = event.clientY;
+  }
 
-    const lapStartPerfMs = getLapStartPerfMs();
-    if (lapStartPerfMs == null) return;
+  function handlePointerUp(event) {
+    if (startX === null) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    startX = null;
+    startY = null;
 
-    let eventPerfMs = event.timeStamp;
-    // Defensive fallback: per the UI Events spec, PointerEvent.timeStamp is a
-    // DOMHighResTimeStamp in the same domain as performance.now(). A small
-    // number of older/unusual environments have been known to report
-    // Date.now()-epoch-based timestamps instead; that would be orders of
-    // magnitude larger than any plausible performance.now() reading, so treat
-    // an implausible value as a signal to fall back to "now" rather than
-    // silently computing a nonsense elapsed time.
-    if (!Number.isFinite(eventPerfMs) || eventPerfMs > 1e11) {
-      eventPerfMs = performance.now();
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (absX < SWIPE_THRESHOLD_PX && absY < SWIPE_THRESHOLD_PX) {
+      actions.onJump(); // a plain tap jumps - the single most common action
+      return;
     }
 
-    const tSeconds = (eventPerfMs - lapStartPerfMs) / 1000;
-    onTap(Math.max(tSeconds, 0));
+    if (absX > absY) {
+      if (dx > 0) actions.onRight();
+      else actions.onLeft();
+    } else if (dy > 0) {
+      actions.onSlide();
+    } else {
+      actions.onJump();
+    }
+  }
+
+  function handleKeyDown(event) {
+    if (event.repeat) return; // ignore OS key-repeat, act once per press
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'a':
+      case 'A':
+        actions.onLeft();
+        break;
+      case 'ArrowRight':
+      case 'd':
+      case 'D':
+        actions.onRight();
+        break;
+      case 'ArrowUp':
+      case 'w':
+      case 'W':
+      case ' ':
+        actions.onJump();
+        break;
+      case 'ArrowDown':
+      case 's':
+      case 'S':
+        actions.onSlide();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
   }
 
   element.addEventListener('pointerdown', handlePointerDown, { passive: true });
-  return () => element.removeEventListener('pointerdown', handlePointerDown);
+  element.addEventListener('pointerup', handlePointerUp, { passive: true });
+  window.addEventListener('keydown', handleKeyDown);
+
+  return () => {
+    element.removeEventListener('pointerdown', handlePointerDown);
+    element.removeEventListener('pointerup', handlePointerUp);
+    window.removeEventListener('keydown', handleKeyDown);
+  };
 }

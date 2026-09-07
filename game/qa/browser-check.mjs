@@ -22,16 +22,17 @@ await page.waitForTimeout(300);
 console.log('--- Home screen loaded ---');
 await page.screenshot({ path: 'qa/screenshots/01-home.png' });
 
-const ringNumber = await page.textContent('#ring-number');
-console.log('Ring number text:', ringNumber);
+const runNumber = await page.textContent('#run-number');
+console.log('Run number text:', runNumber);
 
 console.log('--- Opening Practice ---');
 await page.click('#play-practice');
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/02-run.png' });
 
-// Simulate a handful of taps on the canvas at varying delays, to exercise
-// both successful laps and (eventually) a miss that ends the run.
+// Simulate a handful of blind taps (= jump) on the canvas at varying delays -
+// this deliberately does NOT dodge correctly, so a collision (ending the run)
+// is expected quickly. Skilled, obstacle-aware play is skilled-play.mjs's job.
 const canvas = await page.$('#canvas');
 const box = await canvas.boundingBox();
 const cx = box.x + box.width / 2;
@@ -48,7 +49,7 @@ for (let i = 0; i < 40; i++) {
   }
 }
 
-console.log('Run ended naturally (a Miss occurred within 40 taps):', endedNaturally);
+console.log('Run ended naturally (a collision occurred within 40 taps):', endedNaturally);
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/03-result.png' });
 
@@ -57,7 +58,7 @@ const resultDetail = await page.textContent('#result-detail').catch(() => null);
 const ticks = await page.textContent('#result-ticks').catch(() => null);
 console.log('Result title:', resultTitle);
 console.log('Result detail:', resultDetail);
-console.log('Tick strip:', ticks);
+console.log('Checkpoint strip:', ticks);
 
 console.log('--- Testing share (clipboard fallback) ---');
 await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -74,9 +75,9 @@ await page.waitForTimeout(150);
 await page.click('#open-journal');
 await page.waitForTimeout(150);
 await page.screenshot({ path: 'qa/screenshots/04-journal.png' });
-const median = await page.textContent('#stat-median');
+const best = await page.textContent('#stat-best');
 const runs = await page.textContent('#stat-runs');
-console.log('Journal median offset:', median, '| runs played:', runs);
+console.log('Journal best distance:', best, '| runs played:', runs);
 
 console.log('--- Settings: toggle dark theme, reduce motion ---');
 await page.click('#screen-journal .back-home');
@@ -96,19 +97,18 @@ console.log('--- Reload: settings persisted? ---');
 await page.reload();
 await page.waitForTimeout(300);
 const dataThemeAfterReload = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-const motionChecked = await page.isChecked('#setting-motion').catch(() => null);
 await page.click('#open-settings');
 const motionCheckedAfterOpen = await page.isChecked('#setting-motion');
 console.log('data-theme after reload:', dataThemeAfterReload, '| reduce-motion checked after reopening settings:', motionCheckedAfterOpen);
 
-console.log('--- Testing Daily Ring flow ---');
+console.log('--- Testing Daily Run flow ---');
 await page.click('#screen-settings .back-home');
 await page.waitForTimeout(100);
 await page.click('#play-daily');
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/06-daily-run.png' });
-// Tap once for a first lap; the run is left active and mid-flight here on
-// purpose - the reload immediately below is itself the offline-check step.
+// Tap once (= jump) to exercise input; the run is left active and mid-flight
+// here on purpose - the reload immediately below is itself the offline-check step.
 await page.mouse.click(cx, cy);
 await page.waitForTimeout(200);
 

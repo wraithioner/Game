@@ -8,8 +8,8 @@ These require the optional `playwright` dev dependency and a running static serv
 npm install          # pulls in Playwright (browser binary must already be available locally)
 python3 -m http.server 8837 &
 npm run qa:smoke      # basic flow: home, practice, a run, share, journal, settings, offline
-npm run qa:skilled    # uses a debug hook (?debug=1) to tap with exact timing and verify
-                      # the difficulty ramp, combo system, and the daily 20-lap cap
+npm run qa:skilled    # uses a debug hook (?debug=1) to dodge every obstacle correctly and
+                      # verify the difficulty ramp and the daily distance cap
 npm run qa:network    # checks for failed requests and correct service-worker registration
 npm run qa:analytics  # verifies every docs/PRODUCT_PLAN.md analytics event actually fires
 ```

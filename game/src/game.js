@@ -1,189 +1,211 @@
-// Core deterministic simulation for a Ringtrue run.
-//
-// Design constraints this file exists to satisfy (see docs/GAME_DESIGN.md §1.5,
-// docs/RESEARCH.md §14):
-//  - The sweep is NOT constant angular velocity, so players must read
-//    instantaneous state rather than memorize a fixed rhythm.
-//  - Difficulty ramps on exactly two knobs (speed, band width) up to a hard
-//    plateau, so a skilled player can sustain an arbitrarily long run.
-//  - Everything here is a pure function of (seed, lap index, time) so a hit
-//    judgment can be reconstructed exactly from a raw input timestamp,
-//    independent of frame timing - the fairness-critical property tested in
-//    test/game.test.js.
+// Core deterministic simulation for a Swerve run: a 3-lane endless obstacle
+// dodge. Distance and speed drive everything; obstacle rows are generated
+// lazily and deterministically from a seed, with a hard fairness guarantee
+// (see createRow) so no pattern is ever unavoidable regardless of the
+// player's lane or timing.
 
-import { mulberry32, lapSeed } from './rng.js';
+import { mulberry32, childSeed } from './rng.js';
 
-export const TAU = Math.PI * 2;
+export const LANES = 3; // 0 = left, 1 = center, 2 = right
+export const ROW_SPACING = 40; // distance units between obstacle rows
+export const BASE_SPEED = 6; // units/sec at the start of a run
+export const MAX_SPEED = 16; // units/sec plateau - never exceeded, so a
+// skilled player can sustain an arbitrarily long practice run rather than
+// facing a guaranteed-unwinnable ramp (the same design principle validated
+// for the previous concept in docs/RESEARCH.md carries over: a difficulty
+// ramp should have a hard ceiling, not climb forever).
+export const SPEED_RAMP_DISTANCE = 1600; // distance over which speed ramps to MAX_SPEED
+export const VIEW_DISTANCE = 100; // distance units visible ahead on screen -
+// at MAX_SPEED this is still ~6 seconds of warning before an obstacle
+// arrives, comfortably above human reaction time; this is the actual
+// fairness-critical constant, not a rendering nicety.
+export const JUMP_DURATION = 0.45; // seconds
+export const SLIDE_DURATION = 0.55; // seconds
+export const DAILY_DISTANCE_CAP = 1000; // Daily Run ends (as a clean "cleared")
+// once this is reached, so every player's daily attempt is bounded and
+// comparable - the same reasoning as the previous concept's bounded Daily
+// Ring (docs/RESEARCH.md): an uncapped daily mode makes "how far did you
+// get" incomparable across players with different amounts of free time.
 
-export const DIFFICULTY = Object.freeze({
-  baseSpeedStart: 0.9, // radians/sec
-  baseSpeedMax: 2.6,
-  fairHalfWidthStart: 0.55, // radians (~31.5deg)
-  fairHalfWidthMin: 0.22,
-  trueHalfWidthStart: 0.16,
-  trueHalfWidthMin: 0.06,
-  plateauLaps: 25, // lap index at which the ramp reaches its plateau
-  nonPeriodicAmplitude: 0.35, // fraction of baseSpeed
-  freqMin: 0.4,
-  freqMax: 0.9,
-});
+const OBSTACLE_WEIGHTS = [
+  ['empty', 0.3],
+  ['low', 0.25], // must jump
+  ['high', 0.25], // must slide
+  ['wall', 0.2], // must be in a different lane - never jumpable or slideable
+];
 
 function lerp(a, b, t) {
   return a + (b - a) * Math.min(Math.max(t, 0), 1);
 }
 
-function normalizeAngle(angle) {
-  const a = angle % TAU;
-  return a < 0 ? a + TAU : a;
+/** Current scroll speed at a given distance, ramping to a hard plateau. */
+export function speedAtDistance(distance) {
+  return lerp(BASE_SPEED, MAX_SPEED, distance / SPEED_RAMP_DISTANCE);
 }
 
-/** Shortest angular distance between two angles, always in [0, PI]. */
-export function angularDiff(a, b) {
-  const d = Math.abs(normalizeAngle(a) - normalizeAngle(b));
-  return d > Math.PI ? TAU - d : d;
+function pickWeighted(rand) {
+  let r = rand();
+  for (const [type, weight] of OBSTACLE_WEIGHTS) {
+    if (r < weight) return type;
+    r -= weight;
+  }
+  return 'empty';
 }
 
 /**
- * Builds the deterministic parameters for one lap: where the target sits,
- * how wide its Fair/True bands are, and the sweep's speed profile.
+ * Builds one deterministic obstacle row. The fairness guarantee lives here:
+ * at most LANES-1 lanes may be 'wall' (the one obstacle type that cannot be
+ * cleared by jumping or sliding), so there is always at least one lane a
+ * player can switch into and survive, regardless of which lane they're
+ * currently in or what action they're mid-way through.
  */
-export function createLap(runSeed, lapIndex) {
-  const rand = mulberry32(lapSeed(runSeed, lapIndex));
-  const t = lapIndex / DIFFICULTY.plateauLaps;
+export function createRow(runSeed, rowIndex) {
+  const rand = mulberry32(childSeed(runSeed, rowIndex));
+  const lanes = Array.from({ length: LANES }, () => pickWeighted(rand));
 
-  const baseSpeed = lerp(DIFFICULTY.baseSpeedStart, DIFFICULTY.baseSpeedMax, t);
-  const fairHalfWidth = lerp(DIFFICULTY.fairHalfWidthStart, DIFFICULTY.fairHalfWidthMin, t);
-  const trueHalfWidth = lerp(DIFFICULTY.trueHalfWidthStart, DIFFICULTY.trueHalfWidthMin, t);
+  const wallCount = lanes.filter((t) => t === 'wall').length;
+  if (wallCount >= LANES) {
+    // All lanes blocked with no clearable action - deterministically demote
+    // the last lane to something jumpable rather than leave an unavoidable row.
+    lanes[LANES - 1] = 'low';
+  }
 
   return {
-    lapIndex,
-    centerAngle: rand() * TAU,
-    baseSpeed,
-    fairHalfWidth,
-    trueHalfWidth,
-    amplitude: DIFFICULTY.nonPeriodicAmplitude,
-    freq: lerp(DIFFICULTY.freqMin, DIFFICULTY.freqMax, rand()),
-    phase: rand() * TAU,
+    rowIndex,
+    position: (rowIndex + 1) * ROW_SPACING,
+    lanes,
   };
 }
 
-/**
- * The pointer's angle at time `tSeconds` since this lap started, in [0, TAU).
- * Closed-form integral of a sinusoidally-varying angular velocity, so it can
- * be evaluated exactly at any timestamp - no frame-by-frame accumulation, and
- * therefore no accumulation error and no dependency on render framerate.
- */
-export function angleAt(lap, tSeconds) {
-  const { baseSpeed, amplitude, freq, phase } = lap;
-  const raw =
-    baseSpeed * tSeconds -
-    ((baseSpeed * amplitude) / freq) * (Math.cos(freq * tSeconds + phase) - Math.cos(phase));
-  return normalizeAngle(raw);
-}
-
-/** Instantaneous angular velocity at time `tSeconds`, in radians/sec. */
-export function angularVelocityAt(lap, tSeconds) {
-  const { baseSpeed, amplitude, freq, phase } = lap;
-  return baseSpeed * (1 + amplitude * Math.sin(freq * tSeconds + phase));
+/** Whether `action` clears `obstacleType` while in the obstacle's lane. */
+function clears(obstacleType, action) {
+  if (obstacleType === 'empty') return true;
+  if (obstacleType === 'low') return action === 'jumping';
+  if (obstacleType === 'high') return action === 'sliding';
+  return false; // 'wall' is never clearable by action, only by lane choice
 }
 
 /**
- * Judges a tap at time `tSeconds` against a lap's target bands.
- * offsetMs is the (unsigned) time-equivalent of the angular miss distance -
- * "how many milliseconds early or late" the tap effectively was, computed
- * from the local angular velocity so it stays meaningful as speed ramps up.
+ * A single run: 'daily' (bounded by DAILY_DISTANCE_CAP, seeded by UTC date)
+ * or 'practice' (unbounded, ends only on collision).
  */
-export function judge(lap, tSeconds) {
-  const angle = angleAt(lap, tSeconds);
-  const diff = angularDiff(angle, lap.centerAngle);
-  const velocity = Math.max(Math.abs(angularVelocityAt(lap, tSeconds)), 1e-4);
-  const offsetMs = (diff / velocity) * 1000;
-
-  let result;
-  if (diff <= lap.trueHalfWidth) result = 'perfect';
-  else if (diff <= lap.fairHalfWidth) result = 'fair';
-  else result = 'miss';
-
-  return { result, diff, offsetMs };
-}
-
-/**
- * A single run of the game: 'daily' (fixed lap cap, seeded by UTC date) or
- * 'practice' (unlimited, ends on the first miss).
- */
-export class RingRun {
-  constructor({ seed, mode, lapCap = null }) {
+export class SwerveRun {
+  constructor({ seed, mode, distanceCap = null }) {
     if (mode !== 'daily' && mode !== 'practice') {
       throw new Error(`Unknown mode: ${mode}`);
     }
     this.seed = seed;
     this.mode = mode;
-    this.lapCap = mode === 'daily' ? lapCap ?? 20 : null;
-    this.lapIndex = 0;
+    this.distanceCap = mode === 'daily' ? distanceCap ?? DAILY_DISTANCE_CAP : null;
+
+    this.lane = 1; // start centered
+    this.action = 'running'; // 'running' | 'jumping' | 'sliding'
+    this.actionTimeRemaining = 0;
+
+    this.distance = 0;
     this.status = 'active'; // 'active' | 'ended'
-    this.completed = false; // true only if a daily run reached its lap cap without missing
-    this.score = 0;
-    this.combo = 1;
-    this.maxCombo = 1;
-    this.results = [];
-    this.offsets = [];
-    this.lap = createLap(this.seed, 0);
+    this.completed = false; // true only if a daily run reached its distance cap
+    this.obstaclesCleared = 0;
+
+    this._nextRowIndex = 0;
+    this._nextRow = createRow(this.seed, 0);
   }
 
-  /** Angle of the pointer right now, given elapsed seconds since this lap started. */
-  angleAtLapTime(tSeconds) {
-    return angleAt(this.lap, tSeconds);
+  moveLeft() {
+    if (this.status === 'active') this.lane = Math.max(0, this.lane - 1);
+  }
+
+  moveRight() {
+    if (this.status === 'active') this.lane = Math.min(LANES - 1, this.lane + 1);
+  }
+
+  jump() {
+    if (this.status === 'active' && this.action !== 'sliding') {
+      this.action = 'jumping';
+      this.actionTimeRemaining = JUMP_DURATION;
+    }
+  }
+
+  slide() {
+    if (this.status === 'active' && this.action !== 'jumping') {
+      this.action = 'sliding';
+      this.actionTimeRemaining = SLIDE_DURATION;
+    }
   }
 
   /**
-   * Registers a tap at `tSeconds` since the current lap started. Returns the
-   * outcome, or null if the run has already ended (a stray input should be
-   * ignored, not throw).
+   * Read-only lookahead for the renderer: every row from the next unresolved
+   * one up to `viewDistance` ahead of the player. Pure and side-effect-free
+   * (uses createRow directly rather than mutating _nextRow/_nextRowIndex),
+   * so calling it every frame for drawing never affects collision state.
    */
-  registerTap(tSeconds) {
-    if (this.status !== 'active') return null;
-
-    const { result, diff, offsetMs } = judge(this.lap, tSeconds);
-    this.results.push(result);
-
-    if (result === 'miss') {
-      this.status = 'ended';
-      return this._outcome(result, diff, offsetMs);
+  getVisibleRows(viewDistance) {
+    const rows = [];
+    let i = this._nextRowIndex;
+    let row = createRow(this.seed, i);
+    while (row.position <= this.distance + viewDistance) {
+      rows.push(row);
+      i += 1;
+      row = createRow(this.seed, i);
     }
-
-    this.offsets.push(offsetMs);
-    if (result === 'perfect') {
-      this.combo += 1;
-      this.maxCombo = Math.max(this.maxCombo, this.combo);
-    } else {
-      // Fair softens the combo rather than zeroing it (GAME_DESIGN.md §1.5) -
-      // only a Miss should feel like it erases a run's progress.
-      this.combo = Math.max(1, Math.floor(this.combo / 2));
-    }
-    this.score += this.combo;
-    this.lapIndex += 1;
-
-    if (this.lapCap && this.lapIndex >= this.lapCap) {
-      this.status = 'ended';
-      this.completed = true;
-      return this._outcome(result, diff, offsetMs);
-    }
-
-    this.lap = createLap(this.seed, this.lapIndex);
-    return this._outcome(result, diff, offsetMs);
+    return rows;
   }
 
-  _outcome(result, diff, offsetMs) {
+  /**
+   * Advances the simulation by `dtSeconds`. Exposed as an explicit,
+   * exact-step function (rather than reading a real clock internally) so
+   * tests can drive it deterministically; the real game loop in main.js
+   * calls this once per animation frame with the measured frame delta.
+   */
+  tick(dtSeconds) {
+    if (this.status !== 'active') return this._outcome();
+
+    if (this.actionTimeRemaining > 0) {
+      this.actionTimeRemaining = Math.max(0, this.actionTimeRemaining - dtSeconds);
+      if (this.actionTimeRemaining === 0) this.action = 'running';
+    }
+
+    const speed = speedAtDistance(this.distance);
+    this.distance += speed * dtSeconds;
+
+    // Resolve any rows the player has now reached, up to (and including) one
+    // sitting exactly at the distance cap - reaching the cap doesn't let a
+    // player skip a fairly-clearable obstacle positioned right at the
+    // boundary. Normally at most one row is crossed per frame, but a loop
+    // guards against a large dt (e.g. a backgrounded tab) skipping past more
+    // than one.
+    while (
+      this.status === 'active' &&
+      this._nextRow.position <= this.distance &&
+      (!this.distanceCap || this._nextRow.position <= this.distanceCap)
+    ) {
+      const obstacleType = this._nextRow.lanes[this.lane];
+      if (!clears(obstacleType, this.action)) {
+        this.status = 'ended';
+        return this._outcome();
+      }
+      this.obstaclesCleared += 1;
+      this._nextRowIndex += 1;
+      this._nextRow = createRow(this.seed, this._nextRowIndex);
+    }
+
+    if (this.status === 'active' && this.distanceCap && this.distance >= this.distanceCap) {
+      this.distance = this.distanceCap;
+      this.status = 'ended';
+      this.completed = true;
+    }
+
+    return this._outcome();
+  }
+
+  _outcome() {
     return {
-      result,
-      diff,
-      offsetMs,
-      score: this.score,
-      combo: this.combo,
-      maxCombo: this.maxCombo,
-      lapsCompleted: this.lapIndex,
+      distance: this.distance,
+      lane: this.lane,
+      action: this.action,
       status: this.status,
       completed: this.completed,
+      obstaclesCleared: this.obstaclesCleared,
     };
   }
 }

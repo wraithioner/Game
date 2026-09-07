@@ -16,12 +16,13 @@ await page.click('#play-practice');
 await page.waitForTimeout(150);
 const canvas = await page.$('#canvas');
 const box = await canvas.boundingBox();
-// A handful of untimed taps - some will miss quickly, which is fine, we just
-// want run_started/run_ended/first_lap_result/first_run_demo_seen to fire.
-for (let i = 0; i < 3; i++) {
+// A handful of untimed taps (= jump) - most obstacles won't be jumpable, so a
+// collision is expected quickly. We just want run_started/run_ended/
+// first_run_demo_seen to fire.
+for (let i = 0; i < 6; i++) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(300);
-  const stillRunning = await page.evaluate(() => window.__ringtrueDebug.getRun()?.status === 'active');
+  const stillRunning = await page.evaluate(() => window.__swerveDebug.getRun()?.status === 'active');
   if (!stillRunning) break;
 }
 await page.waitForTimeout(500);
@@ -32,10 +33,10 @@ await page.click('#open-settings');
 await page.uncheck('#setting-sound'); // sound defaults to on, so toggle it off to force a real change event
 await page.waitForTimeout(100);
 
-const events = await page.evaluate(() => window.__ringtrueDebug.getRecentEvents().map((e) => e.event));
+const events = await page.evaluate(() => window.__swerveDebug.getRecentEvents().map((e) => e.event));
 console.log('Events recorded, in order:', events);
 
-const expectedPresent = ['session_start', 'run_started', 'first_run_demo_seen', 'first_lap_result', 'run_ended', 'settings_changed'];
+const expectedPresent = ['session_start', 'run_started', 'first_run_demo_seen', 'run_ended', 'settings_changed'];
 const missing = expectedPresent.filter((e) => !events.includes(e));
 console.log('Missing expected events:', missing.length === 0 ? 'none' : missing.join(', '));
 

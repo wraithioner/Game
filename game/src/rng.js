@@ -33,19 +33,19 @@ export function utcDateString(date = new Date()) {
 
 /**
  * The daily seed: every player on the same UTC calendar date gets this exact
- * value, and therefore the exact same sequence of laps (see game.js).
+ * value, and therefore the exact same sequence of obstacle rows (see game.js).
  */
 export function dailySeed(date = new Date()) {
-  return hashStringToSeed('ringtrue-daily-v1-' + utcDateString(date));
+  return hashStringToSeed('swerve-daily-v1-' + utcDateString(date));
 }
 
 /** A fresh, non-shared seed for Practice mode. */
 export function practiceSeed() {
-  return hashStringToSeed('ringtrue-practice-' + Date.now() + '-' + Math.random());
+  return hashStringToSeed('swerve-practice-' + Date.now() + '-' + Math.random());
 }
 
-/** Derives a per-lap seed from a run seed and lap index, so each lap within a
+/** Derives a per-row seed from a run seed and row index, so each row within a
  * run is independently seeded but the whole run stays fully deterministic. */
-export function lapSeed(runSeed, lapIndex) {
-  return hashStringToSeed(runSeed + ':' + lapIndex);
+export function childSeed(runSeed, index) {
+  return hashStringToSeed(runSeed + ':' + index);
 }

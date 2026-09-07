@@ -1,4 +1,4 @@
-/* Ringtrue visual design system — docs/GAME_DESIGN.md §3–4.
+/* Swerve visual design system — docs/GAME_DESIGN.md §3–4.
    Light palette on bare :root; dark overrides guarded so an explicit
    data-theme always wins over the OS setting in either direction. */
 
@@ -16,7 +16,13 @@
   --accent-primary: #2b2b2e;
   --accent-primary-text: #faf8f5;
   --border: #e4dfd6;
-  --danger-soft: #8a5a3a;
+  /* The "wall" obstacle's color - verified at 5.5:1 against --bg and 3.9:1
+     against --ring (both clear the 3:1 WCAG non-text minimum), and a
+     distinct hue (violet) from both --accent-fair (blue) and --accent-true
+     (amber) so all three obstacle types are hue-distinguishable, not just
+     numbered - see the previous light-theme contrast bug in git history for
+     why this is computed rather than eyeballed. */
+  --accent-danger: #7a4fb0;
 
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --radius: 14px;
@@ -38,6 +44,7 @@
     --ring: #39393f;
     --accent-fair: #6fa8e0;
     --accent-true: #e0ac4b;
+    --accent-danger: #c4a3ea;
     --accent-primary: #f2f0ec;
     --accent-primary-text: #15151a;
     --border: #2e2e35;
@@ -52,6 +59,7 @@
   --ring: #39393f;
   --accent-fair: #6fa8e0;
   --accent-true: #e0ac4b;
+  --accent-danger: #c4a3ea;
   --accent-primary: #f2f0ec;
   --accent-primary-text: #15151a;
   --border: #2e2e35;
@@ -236,8 +244,9 @@ body {
 }
 
 #canvas {
-  width: min(90vw, 420px);
-  height: min(90vw, 420px);
+  width: min(85vw, 380px);
+  aspect-ratio: 3 / 5;
+  max-height: 72vh;
   touch-action: none;
 }
 

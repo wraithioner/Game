@@ -1,95 +1,157 @@
-// Canvas rendering. Purely visual - never a source of truth for hit judgment
-// (that lives entirely in game.js's closed-form angle function), and
-// deliberately decoupled from feedback timing so a slow frame never changes
-// an outcome (docs/GAME_DESIGN.md §1.5, "fairness notes").
+// Canvas rendering for the 3-lane track. Purely visual - collision truth
+// lives entirely in game.js; this only ever reads state, never decides
+// outcomes. Colors are read live from the page's CSS custom properties
+// (styles.css) rather than duplicated here, so there is exactly one place
+// the palette is defined (docs/PRODUCT_PLAN.md - Technical Architecture
+// explains why, from a bug this caused in the previous concept).
 
-import { TAU } from './game.js';
+import { LANES, VIEW_DISTANCE } from './game.js';
 
-// Colors are read live from the page's own CSS custom properties (styles.css)
-// rather than duplicated here - two sources of truth for the same palette is
-// exactly how a light-mode contrast bug once shipped unnoticed (a canvas
-// color was fixed in styles.css but never updated here). Reading the
-// computed values means the canvas always matches whatever the CSS cascade
-// currently resolves to (theme override, prefers-color-scheme, or a future
-// palette change) with nothing to keep in sync by hand.
 export function getPalette() {
   const styles = getComputedStyle(document.documentElement);
   const token = (name) => styles.getPropertyValue(name).trim();
   return {
     bg: token('--bg'),
-    ring: token('--ring'),
-    pointer: token('--accent-primary'),
-    fair: token('--accent-fair'),
-    true: token('--accent-true'),
+    track: token('--ring'),
+    player: token('--accent-primary'),
+    low: token('--accent-true'), // amber - jump over
+    high: token('--accent-fair'), // blue - slide under
+    wall: token('--accent-danger'), // violet - change lanes, never clearable by action
     text: token('--text'),
   };
 }
 
 /**
- * Draws one frame: the ring, the target's Fair/True bands, the sweeping
- * pointer, and (for Perfect/Miss) a brief feedback pulse.
- *
  * @param {CanvasRenderingContext2D} ctx
- * @param {{lap: object, angle: number, reduceMotion: boolean, feedback: {type: string, age: number}|null}} state
+ * @param {{width: number, height: number}} size - logical (CSS pixel) canvas size
+ * @param {{lane: number, action: string, distance: number, visibleRows: object[], reduceMotion: boolean}} state
  */
-export function drawFrame(ctx, canvasSize, state) {
-  const { lap, angle, reduceMotion, feedback } = state;
+export function drawFrame(ctx, size, state) {
+  const { lane, action, distance, visibleRows, reduceMotion } = state;
   const palette = getPalette();
-  const cx = canvasSize / 2;
-  const cy = canvasSize / 2;
-  const radius = canvasSize * 0.36;
+  const { width, height } = size;
+  const laneWidth = width / LANES;
+  const playerY = height * 0.78;
+  const pixelsPerUnit = playerY / VIEW_DISTANCE;
 
-  ctx.clearRect(0, 0, canvasSize, canvasSize);
+  ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = palette.bg;
-  ctx.fillRect(0, 0, canvasSize, canvasSize);
+  ctx.fillRect(0, 0, width, height);
 
-  // Ring track
-  ctx.lineWidth = canvasSize * 0.02;
-  ctx.strokeStyle = palette.ring;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, TAU);
-  ctx.stroke();
+  drawLaneDividers(ctx, palette, width, height, laneWidth, distance, reduceMotion);
 
-  // Fair band (wide arc)
-  drawBand(ctx, cx, cy, radius, lap.centerAngle, lap.fairHalfWidth, palette.fair, canvasSize * 0.055);
-  // True band (narrow arc, drawn on top - also visually distinct by width,
-  // not just color, per docs/GAME_DESIGN.md §3.2 redundant-encoding rule)
-  drawBand(ctx, cx, cy, radius, lap.centerAngle, lap.trueHalfWidth, palette.true, canvasSize * 0.055);
-
-  // Perfect/Fair feedback pulse (skipped or minimized under reduceMotion)
-  if (feedback && !reduceMotion) {
-    drawPulse(ctx, cx, cy, radius, feedback, palette);
+  for (const row of visibleRows) {
+    const rowY = playerY - (row.position - distance) * pixelsPerUnit;
+    if (rowY < -60 || rowY > height + 60) continue;
+    row.lanes.forEach((type, i) => {
+      if (type === 'empty') return;
+      drawObstacle(ctx, palette, type, i * laneWidth, rowY, laneWidth);
+    });
   }
 
-  // Sweeping pointer
-  const px = cx + Math.cos(angle) * radius;
-  const py = cy + Math.sin(angle) * radius;
-  ctx.fillStyle = palette.pointer;
-  ctx.beginPath();
-  ctx.arc(px, py, canvasSize * 0.022, 0, TAU);
-  ctx.fill();
+  drawPlayer(ctx, palette, lane * laneWidth, playerY, laneWidth, action);
 }
 
-function drawBand(ctx, cx, cy, radius, centerAngle, halfWidth, color, lineWidth) {
-  ctx.lineWidth = lineWidth;
-  ctx.strokeStyle = color;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, centerAngle - halfWidth, centerAngle + halfWidth);
-  ctx.stroke();
+function drawLaneDividers(ctx, palette, width, height, laneWidth, distance, reduceMotion) {
+  ctx.strokeStyle = palette.track;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([14, 18]);
+  // The dash offset scrolls with distance so the track visibly moves even
+  // during a straight, obstacle-free stretch - motion is capped/disabled
+  // under Reduce Motion rather than removed entirely, since it also carries
+  // real information (how fast you're currently going).
+  ctx.lineDashOffset = reduceMotion ? 0 : -((distance * 8) % 32);
+  for (let i = 1; i < LANES; i++) {
+    const x = i * laneWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
 }
 
-function drawPulse(ctx, cx, cy, radius, feedback, palette) {
-  const { type, age } = feedback; // age in [0, 1], 0 = just happened
-  if (age >= 1) return;
-  const alpha = 1 - age;
-  const scale = 1 + age * (type === 'perfect' ? 0.5 : 0.25);
-  ctx.save();
-  ctx.globalAlpha = alpha * 0.5;
-  ctx.strokeStyle = type === 'perfect' ? palette.true : type === 'fair' ? palette.fair : palette.pointer;
-  ctx.lineWidth = 3;
+function drawObstacle(ctx, palette, type, laneX, rowY, laneWidth) {
+  const pad = laneWidth * 0.18;
+  const w = laneWidth - pad * 2;
+  ctx.fillStyle = palette[type];
+
+  if (type === 'low') {
+    // A hurdle sitting at ground level - jump over it. Rounded top for a
+    // distinct silhouette, not just a plain block.
+    const h = laneWidth * 0.32;
+    roundRect(ctx, laneX + pad, rowY - h, w, h, [8, 8, 2, 2]);
+    ctx.fill();
+  } else if (type === 'high') {
+    // A bar suspended above the lane - slide under it. Drawn higher up
+    // with visible clearance beneath, so its silhouette alone (even in
+    // grayscale) reads differently from a ground-level hurdle.
+    const h = laneWidth * 0.22;
+    roundRect(ctx, laneX + pad, rowY - laneWidth * 0.85, w, h, 4);
+    ctx.fill();
+  } else if (type === 'wall') {
+    // Full-height block - only a lane change avoids it. Gets a distinct
+    // diagonal-stripe texture on top of its own hue, so the most dangerous
+    // obstacle type is never distinguished by color alone.
+    const h = laneWidth * 0.95;
+    const x = laneX + pad;
+    const y = rowY - h;
+    roundRect(ctx, x, y, w, h, 6);
+    ctx.fill();
+
+    ctx.save();
+    roundRect(ctx, x, y, w, h, 6);
+    ctx.clip();
+    ctx.strokeStyle = palette.bg;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 4;
+    const diagonal = w + h;
+    for (let d = -h; d < diagonal; d += 12) {
+      ctx.beginPath();
+      ctx.moveTo(x + d, y);
+      ctx.lineTo(x + d + h, y + h);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawPlayer(ctx, palette, laneX, playerY, laneWidth, action) {
+  const cx = laneX + laneWidth / 2;
+  const baseSize = laneWidth * 0.5;
+  ctx.fillStyle = palette.player;
+
+  if (action === 'jumping') {
+    // Airborne: smaller and lifted, with a soft ground shadow left behind so
+    // "in the air" reads clearly even as a static frame.
+    ctx.globalAlpha = 0.18;
+    ctx.beginPath();
+    ctx.ellipse(cx, playerY + baseSize * 0.35, baseSize * 0.4, baseSize * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    roundRect(ctx, cx - baseSize * 0.32, playerY - baseSize * 1.15, baseSize * 0.64, baseSize * 0.64, 10);
+    ctx.fill();
+  } else if (action === 'sliding') {
+    // Flattened silhouette, low to the ground.
+    roundRect(ctx, cx - baseSize * 0.42, playerY - baseSize * 0.34, baseSize * 0.84, baseSize * 0.34, 8);
+    ctx.fill();
+  } else {
+    roundRect(ctx, cx - baseSize * 0.34, playerY - baseSize * 0.7, baseSize * 0.68, baseSize * 0.7, 10);
+    ctx.fill();
+  }
+}
+
+function roundRect(ctx, x, y, w, h, radius) {
+  const r = Array.isArray(radius) ? radius : [radius, radius, radius, radius];
   ctx.beginPath();
-  ctx.arc(cx, cy, radius * scale, 0, TAU);
-  ctx.stroke();
-  ctx.restore();
+  ctx.moveTo(x + r[0], y);
+  ctx.lineTo(x + w - r[1], y);
+  ctx.arcTo(x + w, y, x + w, y + r[1], r[1]);
+  ctx.lineTo(x + w, y + h - r[2]);
+  ctx.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]);
+  ctx.lineTo(x + r[3], y + h);
+  ctx.arcTo(x, y + h, x, y + h - r[3], r[3]);
+  ctx.lineTo(x, y + r[0]);
+  ctx.arcTo(x, y, x + r[0], y, r[0]);
+  ctx.closePath();
 }

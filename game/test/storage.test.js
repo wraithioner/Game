@@ -3,25 +3,33 @@ import assert from 'node:assert/strict';
 import { computeJournal, updateStreakOnDailyAttempt, recordRunResult } from '../src/storage.js';
 
 test('computeJournal handles an empty history', () => {
-  const journal = computeJournal({ recentOffsetsMs: [] });
-  assert.equal(journal.medianOffsetMs, null);
+  const journal = computeJournal({ recentDistances: [] });
+  assert.equal(journal.averageDistance, null);
+  assert.equal(journal.recentBest, null);
   assert.equal(journal.sampleSize, 0);
 });
 
-test('computeJournal computes median and consistency', () => {
-  const journal = computeJournal({ recentOffsetsMs: [10, 20, 30, 40, 50] });
-  assert.equal(journal.medianOffsetMs, 30);
+test('computeJournal computes the average and best of the recent window', () => {
+  const journal = computeJournal({ recentDistances: [100, 200, 300, 400, 500] });
+  assert.equal(journal.averageDistance, 300);
+  assert.equal(journal.recentBest, 500);
   assert.equal(journal.sampleSize, 5);
-  assert.ok(journal.consistencyMs > 0);
 });
 
-test('recordRunResult accumulates lifetime totals and caps the offset window', () => {
-  const base = { totalPerfects: 0, totalRuns: 0, longestLapStreak: 0, recentOffsetsMs: [] };
-  const next = recordRunResult(base, { offsets: [5, 6, 7], perfects: 2, lapsCompleted: 3 });
+test('recordRunResult accumulates lifetime totals and caps the distance window', () => {
+  const base = { totalObstaclesCleared: 0, totalRuns: 0, bestDistance: 0, recentDistances: [] };
+  const next = recordRunResult(base, { obstaclesCleared: 8, distance: 340 });
   assert.equal(next.totalRuns, 1);
-  assert.equal(next.totalPerfects, 2);
-  assert.equal(next.longestLapStreak, 3);
-  assert.deepEqual(next.recentOffsetsMs, [5, 6, 7]);
+  assert.equal(next.totalObstaclesCleared, 8);
+  assert.equal(next.bestDistance, 340);
+  assert.deepEqual(next.recentDistances, [340]);
+});
+
+test('recordRunResult tracks the best distance across multiple runs, not just the latest', () => {
+  let stats = { totalObstaclesCleared: 0, totalRuns: 0, bestDistance: 0, recentDistances: [] };
+  stats = recordRunResult(stats, { obstaclesCleared: 5, distance: 500 });
+  stats = recordRunResult(stats, { obstaclesCleared: 2, distance: 210 });
+  assert.equal(stats.bestDistance, 500, 'a worse later run must not overwrite the personal best');
 });
 
 test('a fresh streak starts at 1 on first attempt', () => {

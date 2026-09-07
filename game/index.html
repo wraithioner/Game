@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#15151a" />
-  <meta name="description" content="Ringtrue - a one-tap precision timing game with a daily seeded challenge for every player in the world." />
-  <title>Ringtrue</title>
+  <meta name="description" content="Swerve - a 3-lane endless obstacle dash with a daily seeded course for every player in the world." />
+  <title>Swerve</title>
   <link rel="canonical" href="https://wraithioner.github.io/Game/" />
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
@@ -17,21 +17,21 @@
        hypothesis (docs/RESEARCH.md §11-14) rides on links to this game being
        shared. -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Ringtrue" />
-  <meta property="og:description" content="Tap the instant a sweeping pointer lines up with a shrinking target on a ring — the same ring every player in the world faces once a day." />
+  <meta property="og:title" content="Swerve" />
+  <meta property="og:description" content="Dodge, jump, and slide through an endless 3-lane obstacle course — the same daily course every player in the world faces at once." />
   <meta property="og:url" content="https://wraithioner.github.io/Game/" />
   <meta property="og:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Ringtrue" />
-  <meta name="twitter:description" content="Tap the instant a sweeping pointer lines up with a shrinking target on a ring — the same ring every player in the world faces once a day." />
+  <meta name="twitter:title" content="Swerve" />
+  <meta name="twitter:description" content="Dodge, jump, and slide through an endless 3-lane obstacle course — the same daily course every player in the world faces at once." />
   <meta name="twitter:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
 </head>
 <body>
   <noscript>
     <p style="max-width:420px;margin:3rem auto;padding:0 1.5rem;font-family:system-ui,-apple-system,sans-serif;line-height:1.5;color:#2b2b2e;">
-      Ringtrue needs JavaScript to run — it's a real-time reflex game, and the timing itself is the whole point.
+      Swerve needs JavaScript to run — it's a real-time reflex game, and the timing itself is the whole point.
       Please enable JavaScript for this page and reload.
     </p>
   </noscript>
@@ -39,12 +39,12 @@
 
     <section id="screen-home" class="screen" data-screen="home">
       <button id="open-settings" class="icon-btn corner-right" aria-label="Settings" type="button">⚙</button>
-      <h1 class="wordmark">Ringtrue</h1>
+      <h1 class="wordmark">Swerve</h1>
 
       <div class="today-card">
-        <p class="eyebrow" id="ring-number">Ring —</p>
-        <p class="today-status" id="today-status">One ring. Every player. Once a day.</p>
-        <button id="play-daily" class="btn btn-primary" type="button">Play Today's Ring</button>
+        <p class="eyebrow" id="run-number">Run —</p>
+        <p class="today-status" id="today-status">One course. Every player. Once a day.</p>
+        <button id="play-daily" class="btn btn-primary" type="button">Play Today's Run</button>
       </div>
 
       <button id="play-practice" class="btn btn-secondary" type="button">Practice</button>
@@ -57,11 +57,10 @@
 
     <section id="screen-run" class="screen" data-screen="run" hidden>
       <div class="hud">
-        <span id="hud-lap"></span>
-        <span id="hud-combo"></span>
+        <span id="hud-distance"></span>
       </div>
-      <canvas id="canvas" width="640" height="640" aria-label="Tap when the pointer is inside the glowing band"></canvas>
-      <p class="run-hint" id="run-hint" hidden>Tap when the pointer glows</p>
+      <canvas id="canvas" width="480" height="800" aria-label="Swipe left or right to change lanes, up to jump, down to slide"></canvas>
+      <p class="run-hint" id="run-hint" hidden>Swipe to dodge, jump, or slide</p>
     </section>
 
     <section id="screen-result" class="screen" data-screen="result" hidden>
@@ -78,12 +77,12 @@
 
     <section id="screen-journal" class="screen" data-screen="journal" hidden>
       <button class="icon-btn corner-left back-home" aria-label="Back to home" type="button">×</button>
-      <h2>Precision Journal</h2>
+      <h2>Journal</h2>
       <dl class="stat-list">
-        <div class="stat-row"><dt>Median timing offset</dt><dd id="stat-median">—</dd></div>
-        <div class="stat-row"><dt>Consistency</dt><dd id="stat-consistency">—</dd></div>
-        <div class="stat-row"><dt>Longest run</dt><dd id="stat-longest">—</dd></div>
-        <div class="stat-row"><dt>Total Perfects</dt><dd id="stat-perfects">—</dd></div>
+        <div class="stat-row"><dt>Best distance ever</dt><dd id="stat-best">—</dd></div>
+        <div class="stat-row"><dt>Recent average</dt><dd id="stat-average">—</dd></div>
+        <div class="stat-row"><dt>Recent best</dt><dd id="stat-recent-best">—</dd></div>
+        <div class="stat-row"><dt>Obstacles cleared</dt><dd id="stat-cleared">—</dd></div>
         <div class="stat-row"><dt>Runs played</dt><dd id="stat-runs">—</dd></div>
         <div class="stat-row"><dt>Current streak</dt><dd id="stat-streak">—</dd></div>
       </dl>

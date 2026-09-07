@@ -3,7 +3,7 @@
 // This file intentionally holds all DOM/state-machine logic so the modules
 // above stay pure and unit-testable.
 
-import { RingRun, angleAt, angularDiff } from './game.js';
+import { SwerveRun, VIEW_DISTANCE, DAILY_DISTANCE_CAP, speedAtDistance } from './game.js';
 import { dailySeed, practiceSeed, utcDateString, hashStringToSeed } from './rng.js';
 import {
   loadSettings,
@@ -16,15 +16,15 @@ import {
   saveStreak,
   updateStreakOnDailyAttempt,
 } from './storage.js';
-import { buildShareText, shareResult, tickStripFor } from './share.js';
+import { buildShareText, shareResult, checkpointStripFor, dayIndexFromUtcDate } from './share.js';
 import { playCue, unlockAudio } from './audio.js';
 import { drawFrame } from './render.js';
-import { listenForTap } from './input.js';
+import { listenForGestures } from './input.js';
 import { track, getRecentEvents } from './analytics.js';
 
-const DAILY_LAP_CAP = 20;
-const FEEDBACK_PULSE_MS = 260;
 const RESULT_TRANSITION_DELAY_MS = 380;
+const BASE_WIDTH = 300;
+const BASE_HEIGHT = 500;
 
 // ---- Persistent state (loaded once, saved on change) ----------------------
 
@@ -105,12 +105,8 @@ function todayKey() {
   return utcDateString(new Date());
 }
 
-function dayIndexForToday() {
-  return Math.floor((Date.parse(todayKey() + 'T00:00:00Z') - Date.parse('2026-01-01T00:00:00Z')) / 86400000) + 1;
-}
-
 function dailyResultKey() {
-  return 'ringtrue.dailyResult.v1';
+  return 'swerve.dailyResult.v1';
 }
 
 function loadTodaysDailyResult() {
@@ -133,19 +129,19 @@ function saveTodaysDailyResult(result) {
 }
 
 function refreshHomeScreen() {
-  document.getElementById('ring-number').textContent = `Ring #${dayIndexForToday()}`;
+  document.getElementById('run-number').textContent = `Run #${dayIndexFromUtcDate(todayKey())}`;
 
   const existing = loadTodaysDailyResult();
   const statusEl = document.getElementById('today-status');
   const playDailyBtn = document.getElementById('play-daily');
   if (existing) {
     statusEl.textContent = existing.completed
-      ? `Cleared today's ring — ${existing.lapsCompleted} laps`
-      : `Today's ring: ${existing.lapsCompleted} laps`;
+      ? `Cleared today's run — ${Math.round(existing.distance)}m`
+      : `Today's run: ${Math.round(existing.distance)}m`;
     playDailyBtn.textContent = 'View Result';
   } else {
-    statusEl.textContent = 'One ring. Every player. Once a day.';
-    playDailyBtn.textContent = "Play Today's Ring";
+    statusEl.textContent = 'One course. Every player. Once a day.';
+    playDailyBtn.textContent = "Play Today's Run";
   }
 
   const flame = document.getElementById('streak-flame');
@@ -161,12 +157,12 @@ function refreshHomeScreen() {
 
 function refreshJournalScreen() {
   const journal = computeJournal(stats);
-  document.getElementById('stat-median').textContent =
-    journal.medianOffsetMs == null ? '—' : `${journal.medianOffsetMs.toFixed(0)} ms`;
-  document.getElementById('stat-consistency').textContent =
-    journal.consistencyMs == null ? '—' : `±${journal.consistencyMs.toFixed(0)} ms`;
-  document.getElementById('stat-longest').textContent = `${stats.longestLapStreak} laps`;
-  document.getElementById('stat-perfects').textContent = String(stats.totalPerfects);
+  document.getElementById('stat-best').textContent = stats.bestDistance ? `${Math.round(stats.bestDistance)}m` : '—';
+  document.getElementById('stat-average').textContent =
+    journal.averageDistance == null ? '—' : `${Math.round(journal.averageDistance)}m`;
+  document.getElementById('stat-recent-best').textContent =
+    journal.recentBest == null ? '—' : `${Math.round(journal.recentBest)}m`;
+  document.getElementById('stat-cleared').textContent = String(stats.totalObstaclesCleared);
   document.getElementById('stat-runs').textContent = String(stats.totalRuns);
   document.getElementById('stat-streak').textContent = `${streak.count} day${streak.count === 1 ? '' : 's'}`;
 }
@@ -174,20 +170,18 @@ function refreshJournalScreen() {
 // ---- Run screen: the core game loop --------------------------------------------
 
 let activeRun = null;
-let lapStartPerfMs = null;
+let lastFramePerfMs = null;
 let runStartPerfMs = null;
 let rafId = null;
 let unsubscribeInput = null;
-let lastFeedback = null; // { type, atPerfMs }
 let showFirstRunHint = false;
 
 function setupCanvasResolution() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  const size = 640;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
+  canvas.width = BASE_WIDTH * dpr;
+  canvas.height = BASE_HEIGHT * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return size;
+  return { width: BASE_WIDTH, height: BASE_HEIGHT };
 }
 
 let canvasLogicalSize = setupCanvasResolution();
@@ -197,89 +191,84 @@ window.addEventListener('resize', () => {
 
 function startRun(mode) {
   const seed = mode === 'daily' ? dailySeed(new Date()) : practiceSeed();
-  activeRun = new RingRun({ seed, mode, lapCap: mode === 'daily' ? DAILY_LAP_CAP : null });
-  lapStartPerfMs = performance.now();
-  runStartPerfMs = lapStartPerfMs;
-  lastFeedback = null;
+  activeRun = new SwerveRun({ seed, mode });
+  lastFramePerfMs = performance.now();
+  runStartPerfMs = lastFramePerfMs;
   showFirstRunHint = !hasPlayedEver;
   document.getElementById('run-hint').hidden = !showFirstRunHint;
 
   track('run_started', { mode });
-  if (mode === 'daily') track('daily_challenge_started', { dayIndex: dayIndexForToday() });
+  if (mode === 'daily') track('daily_challenge_started', { dayIndex: dayIndexFromUtcDate(todayKey()) });
   if (showFirstRunHint) track('first_run_demo_seen', {});
 
   showScreen('run');
   updateHud();
 
   if (unsubscribeInput) unsubscribeInput();
-  // Listens on the whole run screen, not just the canvas rectangle - "a
-  // single tap, anywhere on the screen" (docs/GAME_DESIGN.md §1.3) means the
-  // HUD margins and hint-text area must be tappable too, not just the ring
-  // itself.
-  unsubscribeInput = listenForTap(screens.run, () => lapStartPerfMs, handleTap);
+  // Listens on the whole run screen, not just the canvas rectangle, so the
+  // HUD margins and hint-text area are swipeable too, not just the track itself.
+  unsubscribeInput = listenForGestures(screens.run, {
+    onLeft: () => handleAction(() => activeRun.moveLeft(), 'laneChange'),
+    onRight: () => handleAction(() => activeRun.moveRight(), 'laneChange'),
+    onJump: () => handleAction(() => activeRun.jump(), 'jump'),
+    onSlide: () => handleAction(() => activeRun.slide(), 'slide'),
+  });
 
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(renderLoop);
 }
 
 function updateHud() {
-  document.getElementById('hud-lap').textContent = `Lap ${activeRun.lapIndex + 1}`;
-  document.getElementById('hud-combo').textContent = activeRun.combo > 1 ? `×${activeRun.combo}` : '';
+  document.getElementById('hud-distance').textContent = `${Math.round(activeRun.distance)}m`;
 }
 
-function renderLoop() {
-  if (!activeRun) return;
-  const nowPerf = performance.now();
-  const tSeconds = (nowPerf - lapStartPerfMs) / 1000;
-  const angle = activeRun.status === 'active' ? activeRun.angleAtLapTime(tSeconds) : activeRun.angleAtLapTime(0);
-
-  const feedback = lastFeedback
-    ? { type: lastFeedback.type, age: (nowPerf - lastFeedback.atPerfMs) / FEEDBACK_PULSE_MS }
-    : null;
-
-  drawFrame(ctx, canvasLogicalSize, {
-    lap: activeRun.lap,
-    angle,
-    reduceMotion: settings.reduceMotion,
-    feedback,
-  });
-
-  if (activeRun.status === 'active') {
-    rafId = requestAnimationFrame(renderLoop);
-  }
-}
-
-function handleTap(tSeconds) {
+function handleAction(applyAction, cueName) {
   if (!activeRun || activeRun.status !== 'active') return;
   unlockAudio();
-
-  const isPlayersFirstEverLap = stats.totalRuns === 0 && activeRun.lapIndex === 0;
-  const outcome = activeRun.registerTap(tSeconds);
-  if (!outcome) return;
-
-  if (isPlayersFirstEverLap) {
-    track('first_lap_result', { result: outcome.result, offsetMs: outcome.offsetMs });
-  }
-
-  playCue(outcome.result, settings);
-  lastFeedback = { type: outcome.result, atPerfMs: performance.now() };
+  applyAction();
+  playCue(cueName, settings);
 
   if (showFirstRunHint) {
     showFirstRunHint = false;
     document.getElementById('run-hint').hidden = true;
   }
+}
+
+function renderLoop(nowPerf) {
+  if (!activeRun) return;
+  // Clamped so a backgrounded/throttled tab resuming after a long gap can't
+  // hand the simulation a huge dt and skip straight past several rows.
+  const dtSeconds = Math.min((nowPerf - lastFramePerfMs) / 1000, 0.1);
+  lastFramePerfMs = nowPerf;
+
+  const outcome = activeRun.tick(dtSeconds);
+
+  drawFrame(ctx, canvasLogicalSize, {
+    lane: outcome.lane,
+    action: outcome.action,
+    distance: outcome.distance,
+    visibleRows: activeRun.getVisibleRows(VIEW_DISTANCE),
+    reduceMotion: settings.reduceMotion,
+  });
 
   if (outcome.status === 'active') {
-    lapStartPerfMs = performance.now();
     updateHud();
-  } else {
-    setTimeout(() => finishRun(outcome), RESULT_TRANSITION_DELAY_MS);
+    rafId = requestAnimationFrame(renderLoop);
+    return;
   }
+
+  rafId = null;
+  if (unsubscribeInput) {
+    unsubscribeInput();
+    unsubscribeInput = null;
+  }
+  playCue(outcome.completed ? 'milestone' : 'collision', settings);
+  setTimeout(() => finishRun(outcome), RESULT_TRANSITION_DELAY_MS);
 }
 
 function voidCurrentRun() {
-  // Backgrounding/navigating away mid-run discards it without penalty
-  // (docs/GAME_DESIGN.md §1.13) - not scored as a Miss, not saved anywhere.
+  // Backgrounding/navigating away mid-run discards it without penalty - not
+  // scored as a collision, not saved anywhere.
   if (unsubscribeInput) {
     unsubscribeInput();
     unsubscribeInput = null;
@@ -302,22 +291,11 @@ document.addEventListener('visibilitychange', () => {
 // ---- Result screen -------------------------------------------------------------
 
 function finishRun(outcome) {
-  if (unsubscribeInput) {
-    unsubscribeInput();
-    unsubscribeInput = null;
-  }
-  if (rafId) {
-    cancelAnimationFrame(rafId);
-    rafId = null;
-  }
-
   const run = activeRun;
-  const perfectCount = run.results.filter((r) => r === 'perfect').length;
 
   stats = recordRunResult(stats, {
-    offsets: run.offsets,
-    perfects: perfectCount,
-    lapsCompleted: run.lapIndex,
+    obstaclesCleared: run.obstaclesCleared,
+    distance: run.distance,
   });
   saveStats(stats);
   hasPlayedEver = true;
@@ -325,8 +303,8 @@ function finishRun(outcome) {
   track('run_ended', {
     mode: run.mode,
     durationMs: Math.round(performance.now() - runStartPerfMs),
-    lapsSurvived: run.lapIndex,
-    resultSequence: run.results.join(','),
+    distance: Math.round(run.distance),
+    completed: run.completed,
   });
 
   if (run.mode === 'daily') {
@@ -334,17 +312,15 @@ function finishRun(outcome) {
     streak = updateStreakOnDailyAttempt(streak, todayKey());
     saveStreak(streak);
     saveTodaysDailyResult({
-      results: run.results,
-      lapsCompleted: run.lapIndex,
+      distance: run.distance,
       completed: run.completed,
-      score: run.score,
-      maxCombo: run.maxCombo,
+      obstaclesCleared: run.obstaclesCleared,
     });
 
     track('daily_challenge_completed', {
-      dayIndex: dayIndexForToday(),
+      dayIndex: dayIndexFromUtcDate(todayKey()),
       completed: run.completed,
-      lapsCompleted: run.lapIndex,
+      distance: Math.round(run.distance),
     });
 
     if (streak.count === 1 && previousStreak.count > 1) {
@@ -362,10 +338,14 @@ function finishRun(outcome) {
 }
 
 function renderResultScreen(run) {
-  const title = run.completed ? 'Ring cleared!' : `${run.lapIndex} laps`;
+  const title = run.completed ? 'Course cleared!' : `${Math.round(run.distance)}m`;
   document.getElementById('result-title').textContent = title;
-  document.getElementById('result-detail').textContent = `Score ${run.score} · best combo ×${run.maxCombo}`;
-  document.getElementById('result-ticks').textContent = tickStripFor(run.results);
+  document.getElementById('result-detail').textContent =
+    `${run.obstaclesCleared} obstacle${run.obstaclesCleared === 1 ? '' : 's'} cleared`;
+  // Always normalized against the daily distance cap, even for a practice
+  // run, so the strip reads as "progress toward a comparable benchmark"
+  // rather than needing a second, uncapped visual language.
+  document.getElementById('result-ticks').textContent = checkpointStripFor(run.distance, DAILY_DISTANCE_CAP);
 
   const againBtn = document.getElementById('result-again');
   againBtn.textContent = run.mode === 'daily' ? 'Practice' : 'Play Again';
@@ -373,8 +353,8 @@ function renderResultScreen(run) {
 
   document.getElementById('share-btn').onclick = async () => {
     const text = buildShareText({
-      results: run.results,
-      lapsCompleted: run.lapIndex,
+      distance: run.distance,
+      distanceCap: DAILY_DISTANCE_CAP,
       completed: run.completed,
       streakCount: streak.count,
       utcDateString: todayKey(),
@@ -402,11 +382,9 @@ function renderResultScreen(run) {
 function showStoredDailyResult(stored) {
   renderResultScreen({
     mode: 'daily',
-    results: stored.results,
-    lapIndex: stored.lapsCompleted,
+    distance: stored.distance,
     completed: stored.completed,
-    score: stored.score,
-    maxCombo: stored.maxCombo ?? 1, // older cached results predate maxCombo tracking
+    obstaclesCleared: stored.obstaclesCleared,
   });
   showScreen('result');
 }
@@ -470,26 +448,15 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Read-only debug hook for automated QA (docs/PRODUCT_PLAN.md - Testing
 // Strategy). Only attached behind an explicit query flag, never in normal
-// play, and exposes no write access - this is a single-player, offline,
-// client-only game with no server-authoritative state to protect, so a
-// read-only introspection hook carries no fairness or security risk.
+// play, and exposes no write access to the run itself beyond calling the
+// same public methods a real gesture would - this is a single-player,
+// offline, client-only game with no server-authoritative state to protect,
+// so this carries no fairness or security risk.
 if (new URLSearchParams(location.search).has('debug')) {
-  window.__ringtrueDebug = {
+  window.__swerveDebug = {
     getRun: () => activeRun,
-    getLapStartPerfMs: () => lapStartPerfMs,
     getRecentEvents,
-    // Coarse numeric search for a tap time within the next few laps that
-    // lands dead-center - used only by automated QA to simulate skilled play
-    // deterministically, never by the game itself.
-    findPerfectTapSeconds: (withinSeconds = 8, stepSeconds = 0.002) => {
-      const lap = activeRun.lap;
-      let best = { t: 0, diff: Infinity };
-      for (let t = 0; t < withinSeconds; t += stepSeconds) {
-        const diff = angularDiff(angleAt(lap, t), lap.centerAngle);
-        if (diff < best.diff) best = { t, diff };
-      }
-      return best.t;
-    },
+    speedAtDistance,
   };
 }
 

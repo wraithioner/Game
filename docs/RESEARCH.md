@@ -2,6 +2,66 @@
 
 *Studio deliverable — Part 1 of 3. See also [`GAME_DESIGN.md`](./GAME_DESIGN.md) (the design spec for the selected concept) and [`PRODUCT_PLAN.md`](./PRODUCT_PLAN.md) (monetization, technical architecture, production roadmap, and everything needed to ship it).*
 
+## Addendum: Post-Research Pivot (read this first)
+
+This entire document is preserved unedited below as the historical record of
+the research and validation process that selected *Ringtrue* (research
+codename "Notch," §9-12) — a one-tap precision-timing dial game — as the
+concept to build. That concept was built, polished, and made launch-ready.
+
+After that MVP was complete, the person directing this project reviewed the
+shipped game and issued a direct, explicit product override: they wanted an
+endless obstacle-dodge runner in the style of *Dookey Dash* (Yuga Labs/BAYC)
+— a 3-lane dodge/jump/slide mechanic, not a circular timing mechanic. This
+was not a concept the twelve-option panel in §9 evaluated, nor something the
+scoring matrix in §10 could have surfaced — it was a direct specification
+from the project's stakeholder, made after seeing the first concept in
+practice, and it took priority over the research's own recommendation.
+
+The shipped game is now **Swerve**, documented in the rewritten
+`GAME_DESIGN.md` and `PRODUCT_PLAN.md`. For transparency, here is what
+carried over from this research directly versus what became moot:
+
+**Carried over unchanged**, because the underlying reasoning was never
+specific to the ring mechanic:
+
+- The daily-seed + spoiler-free share-card retention mechanic (§13's central
+  evidence-backed finding) — re-skinned from a lap-result "tick-strip" to a
+  distance-based "checkpoint-strip," same mechanism.
+- The zero-monetization, zero-account, zero-backend MVP scope, and the
+  reasoning behind shipping as a free web page before any native/store
+  investment (§14's evidence, `PRODUCT_PLAN.md`).
+- The engineering discipline established during the Ringtrue build: a single
+  source of truth for the color palette (read live from CSS custom
+  properties rather than duplicated in canvas code, after a real contrast
+  bug), colorblind-safe encoding via shape/position rather than color alone,
+  and WCAG contrast verified computationally rather than eyeballed.
+- The participation-based (not performance-based) streak design, including
+  earned-not-purchased freezes.
+
+**Became moot**, because it was specific to the ring-timing mechanic itself:
+
+- The competitor analysis in §6-8 as applied to *this specific game* (the
+  general player-pain-point and monetization-complaint findings still
+  transferred; the specific "sweeping dial" competitive landscape did not).
+- The concept-specific risk register in §14 (a single motor-timing skill
+  ceiling, millisecond-precision hit detection, a "provably fair dial"
+  latency-fairness claim) — none of these risks apply to a lane-based dodge
+  mechanic, which has its own risk profile documented fresh in the new
+  `PRODUCT_PLAN.md`.
+- The final recommendation and scoring in §10-12 — Ringtrue/Notch no longer
+  ships, though it remains the top-scored concept *of the twelve considered*,
+  which simply weren't the twelve options that mattered once a direct
+  specification arrived.
+
+The lesson taken forward: a rigorous research process validates *among the
+options it considers* — it doesn't substitute for confirming the
+stakeholder's actual intent before building. That confirmation now happens
+explicitly, via direct clarifying questions, before any comparable
+ground-up rebuild.
+
+---
+
 ## 1. Executive Summary
 
 This document is the evidence base for a single decision: **which original, minimalist mobile game should this studio build.** It follows the brief's required sequence — research → opportunity analysis → concept generation → comparison → validation — before any design or code commitment is made.

@@ -6,9 +6,9 @@
 // persistence at all in that case.
 
 const KEYS = {
-  stats: 'ringtrue.stats.v1',
-  settings: 'ringtrue.settings.v1',
-  streak: 'ringtrue.streak.v1',
+  stats: 'swerve.stats.v1',
+  settings: 'swerve.settings.v1',
+  streak: 'swerve.streak.v1',
 };
 
 function readJSON(key, fallback) {
@@ -38,10 +38,10 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 const DEFAULT_STATS = Object.freeze({
-  totalPerfects: 0,
   totalRuns: 0,
-  longestLapStreak: 0, // best lapsCompleted across any single run
-  recentOffsetsMs: [], // capped rolling window, for median/consistency
+  totalObstaclesCleared: 0,
+  bestDistance: 0, // best distance reached across any single run, ever
+  recentDistances: [], // capped rolling window, for recent-form stats
 });
 
 const DEFAULT_STREAK = Object.freeze({
@@ -51,7 +51,7 @@ const DEFAULT_STREAK = Object.freeze({
   freezesEarnedAtMilestones: [], // which 7-day milestones already granted a freeze
 });
 
-const OFFSET_WINDOW = 200; // cap so storage doesn't grow unbounded over a long-lived install
+const DISTANCE_WINDOW = 200; // cap so storage doesn't grow unbounded over a long-lived install
 
 export function loadSettings() {
   return readJSON(KEYS.settings, { ...DEFAULT_SETTINGS });
@@ -62,7 +62,7 @@ export function saveSettings(settings) {
 }
 
 export function loadStats() {
-  return readJSON(KEYS.stats, { ...DEFAULT_STATS, recentOffsetsMs: [] });
+  return readJSON(KEYS.stats, { ...DEFAULT_STATS, recentDistances: [] });
 }
 
 export function saveStats(stats) {
@@ -70,33 +70,27 @@ export function saveStats(stats) {
 }
 
 /** Folds one completed run's results into lifetime stats. */
-export function recordRunResult(stats, { offsets, perfects, lapsCompleted }) {
+export function recordRunResult(stats, { obstaclesCleared, distance }) {
   const next = {
     ...stats,
     totalRuns: stats.totalRuns + 1,
-    totalPerfects: stats.totalPerfects + perfects,
-    longestLapStreak: Math.max(stats.longestLapStreak, lapsCompleted),
-    recentOffsetsMs: [...stats.recentOffsetsMs, ...offsets].slice(-OFFSET_WINDOW),
+    totalObstaclesCleared: stats.totalObstaclesCleared + obstaclesCleared,
+    bestDistance: Math.max(stats.bestDistance, distance),
+    recentDistances: [...stats.recentDistances, distance].slice(-DISTANCE_WINDOW),
   };
   return next;
 }
 
-/** Median and consistency (population stddev) of the recent-offsets window. */
+/** Recent-form stats (average and best distance over the rolling window) -
+ * distinct from lifetime bestDistance, which the window can't erase. */
 export function computeJournal(stats) {
-  const offsets = stats.recentOffsetsMs;
-  if (offsets.length === 0) {
-    return { medianOffsetMs: null, consistencyMs: null, sampleSize: 0 };
+  const distances = stats.recentDistances;
+  if (distances.length === 0) {
+    return { averageDistance: null, recentBest: null, sampleSize: 0 };
   }
-  const sorted = [...offsets].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const medianOffsetMs =
-    sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-
-  const mean = offsets.reduce((sum, v) => sum + v, 0) / offsets.length;
-  const variance = offsets.reduce((sum, v) => sum + (v - mean) ** 2, 0) / offsets.length;
-  const consistencyMs = Math.sqrt(variance);
-
-  return { medianOffsetMs, consistencyMs, sampleSize: offsets.length };
+  const averageDistance = distances.reduce((sum, v) => sum + v, 0) / distances.length;
+  const recentBest = Math.max(...distances);
+  return { averageDistance, recentBest, sampleSize: distances.length };
 }
 
 export function loadStreak() {
@@ -114,10 +108,11 @@ function daysBetweenUtc(dateStrA, dateStrB) {
 }
 
 /**
- * Updates the streak after a Daily Ring attempt. Counts PARTICIPATION, not
- * performance (docs/GAME_DESIGN.md §1.9) - any attempt, even a 1-lap result,
- * extends the streak, specifically to avoid punishing a bad day twice.
- * A gap of exactly one day consumes an earned freeze if one is available.
+ * Updates the streak after a Daily Run attempt. Counts PARTICIPATION, not
+ * performance (docs/GAME_DESIGN.md §1.9) - any attempt, even one ending in
+ * an immediate collision, extends the streak, specifically to avoid
+ * punishing a bad day twice. A gap of exactly one day consumes an earned
+ * freeze if one is available.
  */
 export function updateStreakOnDailyAttempt(streak, todayUtcDate) {
   if (streak.lastCompletedUtcDate === todayUtcDate) {

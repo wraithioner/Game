@@ -41,7 +41,7 @@ jobs:
         # deploy that changes any cached file can never silently ship with a
         # stale service worker cache because someone forgot to bump a version
         # string by hand.
-        run: sed -i "s/ringtrue-dev/ringtrue-${GITHUB_SHA::8}/" site/sw.js
+        run: sed -i "s/swerve-dev/swerve-${GITHUB_SHA::8}/" site/sw.js
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mulberry32, hashStringToSeed, dailySeed, lapSeed } from '../src/rng.js';
+import { mulberry32, hashStringToSeed, dailySeed, childSeed } from '../src/rng.js';
 
 test('mulberry32 is deterministic for a given seed', () => {
   const a = mulberry32(42);
@@ -41,7 +41,7 @@ test('dailySeed differs across different UTC calendar dates', () => {
   assert.notEqual(dailySeed(day1), dailySeed(day2));
 });
 
-test('lapSeed is deterministic and varies by lap index', () => {
-  assert.equal(lapSeed(123, 0), lapSeed(123, 0));
-  assert.notEqual(lapSeed(123, 0), lapSeed(123, 1));
+test('childSeed is deterministic and varies by index', () => {
+  assert.equal(childSeed(123, 0), childSeed(123, 0));
+  assert.notEqual(childSeed(123, 0), childSeed(123, 1));
 });
