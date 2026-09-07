@@ -44,7 +44,10 @@ export function listenForSteering({ pointerElement, canvasElement, boostButtonEl
     const halfSize = Math.min(rect.width, rect.height) / 2; // circular mapping, not stretched to an oval
     return clampToDisc(
       (event.clientX - (rect.left + rect.width / 2)) / halfSize,
-      (event.clientY - (rect.top + rect.height / 2)) / halfSize
+      // Screen/DOM Y increases downward, but game.js's Y (and render.js's
+      // Three.js world Y) increases upward, matching visual "up" - negate
+      // here so dragging up actually moves the player up on screen, not down.
+      -(event.clientY - (rect.top + rect.height / 2)) / halfSize
     );
   }
 
@@ -106,8 +109,8 @@ export function listenForSteering({ pointerElement, canvasElement, boostButtonEl
         let dy = 0;
         if (heldKeys.has('left')) dx -= 1;
         if (heldKeys.has('right')) dx += 1;
-        if (heldKeys.has('up')) dy -= 1;
-        if (heldKeys.has('down')) dy += 1;
+        if (heldKeys.has('up')) dy += 1; // +y is up, matching game.js/render.js's convention
+        if (heldKeys.has('down')) dy -= 1;
         if (dx !== 0 || dy !== 0) {
           const length = Math.hypot(dx, dy);
           target = clampToDisc(

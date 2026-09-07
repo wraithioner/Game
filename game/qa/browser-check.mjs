@@ -59,7 +59,9 @@ const collisionPlan = await page.evaluate(() => {
   };
 });
 const targetX = canvasCenterX + collisionPlan.x * (box.width / 2);
-const targetY = canvasCenterY + collisionPlan.y * (box.height / 2);
+// Game-space y increases upward (matching render.js's Three.js world),
+// screen y increases downward - negate to convert back to a screen position.
+const targetY = canvasCenterY - collisionPlan.y * (box.height / 2);
 await page.mouse.move(targetX, targetY);
 await page.mouse.down();
 await page.mouse.move(targetX, targetY, { steps: 3 });
