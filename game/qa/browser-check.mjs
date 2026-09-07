@@ -108,7 +108,8 @@ await page.waitForTimeout(100);
 await page.click('#play-daily');
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/06-daily-run.png' });
-// Tap once for a first lap, then click back without finishing (voids run).
+// Tap once for a first lap; the run is left active and mid-flight here on
+// purpose - the reload immediately below is itself the offline-check step.
 await page.mouse.click(cx, cy);
 await page.waitForTimeout(200);
 

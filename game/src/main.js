@@ -220,7 +220,11 @@ function startRun(mode) {
   updateHud();
 
   if (unsubscribeInput) unsubscribeInput();
-  unsubscribeInput = listenForTap(canvas, () => lapStartPerfMs, handleTap);
+  // Listens on the whole run screen, not just the canvas rectangle - "a
+  // single tap, anywhere on the screen" (docs/GAME_DESIGN.md §1.3) means the
+  // HUD margins and hint-text area must be tappable too, not just the ring
+  // itself.
+  unsubscribeInput = listenForTap(screens.run, () => lapStartPerfMs, handleTap);
 
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(renderLoop);
@@ -427,12 +431,6 @@ document.getElementById('play-daily').addEventListener('click', () => {
 });
 
 document.getElementById('play-practice').addEventListener('click', () => startRun('practice'));
-
-document.getElementById('run-back').addEventListener('click', () => {
-  voidCurrentRun();
-  showScreen('home');
-  refreshHomeScreen();
-});
 
 document.getElementById('result-home').addEventListener('click', () => {
   showScreen('home');

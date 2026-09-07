@@ -33,7 +33,7 @@
 
 ### 1.3 Controls
 
-A single tap, anywhere on the screen, one-handed, portrait-only. Tap is deliberately the *only* gesture in the game — no swipe, hold, or drag — chosen specifically to avoid the "misregistered gesture" complaint pattern found repeatedly against swipe-driven minimalist games in the competitor research (2048, mobile Tetris; see RESEARCH.md §7). Because the entire input vocabulary is "tap," there is no tutorial-worthy control complexity to teach.
+A single tap, anywhere on the screen, one-handed, portrait-only. "Anywhere" is literal: the tap target is the full Run screen, not just the visual ring — the HUD margins and hint-text area are equally valid places to tap, so a player never has to aim for a specific rectangle to play. Tap is deliberately the *only* gesture in the game — no swipe, hold, or drag — chosen specifically to avoid the "misregistered gesture" complaint pattern found repeatedly against swipe-driven minimalist games in the competitor research (2048, mobile Tetris; see RESEARCH.md §7). Because the entire input vocabulary is "tap," there is no tutorial-worthy control complexity to teach, and (§2.3) there is deliberately no second, differently-behaving control (like an exit button) competing with it on the same screen.
 
 ### 1.4 Rules & Win/Loss
 
@@ -119,7 +119,9 @@ No modal tutorial, no text overlay, no "swipe to continue" carousel. The very fi
 
 ### 2.3 Information Architecture
 
-Two-level navigation only: Home is the root, and every other screen (Run, Result, Journal, Settings) is one tap away from Home and one tap back to it. There is no nested menu system, no more than 2 taps to reach any feature in the app — a direct implementation of the brief's "avoid complex menus, avoid large numbers of buttons" requirement.
+Two-level navigation only: Home is the root, and Result, Journal, and Settings are each one tap away from Home and one tap back to it. There is no nested menu system, no more than 2 taps to reach any feature in the app — a direct implementation of the brief's "avoid complex menus, avoid large numbers of buttons" requirement.
+
+The **Run** screen is the one deliberate exception, and on purpose: it has no back/exit control at all, because a single tap anywhere on it is the entire input vocabulary (§1.3) and adding a second, differently-behaving tap target (an exit button competing with the play area for the same gesture) would be exactly the kind of control-surface complexity the brief warns against. A run is short (10–45 seconds) and ends on its own; leaving mid-run (switching apps, backgrounding the tab) is handled safely by voiding the run with no penalty (§1.13), which is sufficient — a dedicated "quit" affordance isn't needed for a screen you're never stuck on for long.
 
 ### 2.4 Microinteractions
 

@@ -62,8 +62,12 @@ const maxCombo = Math.max(...lapLog.filter(Boolean).map((l) => l.combo));
 console.log(`Max combo reached: ×${maxCombo}`);
 
 console.log('\n=== Daily mode: verifying the 20-lap cap ends the run as "completed" ===');
-await page.click('#run-back');
-await page.waitForTimeout(150);
+// There's no in-game exit button by design (a single tap, anywhere on the
+// screen, is the entire input vocabulary - docs/GAME_DESIGN.md §1.3), so
+// reload back to a clean Home screen the same way a real user would (closing
+// and reopening the app) rather than simulating a removed control.
+await page.reload({ waitUntil: 'load' });
+await page.waitForTimeout(200);
 await page.click('#play-daily');
 await page.waitForTimeout(150);
 
