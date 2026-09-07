@@ -34,7 +34,6 @@ const DEFAULT_SETTINGS = Object.freeze({
   soundEnabled: true,
   hapticsEnabled: true,
   reduceMotion: false,
-  colorblindSafe: false,
   theme: 'auto', // 'auto' | 'light' | 'dark'
 });
 

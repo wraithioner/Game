@@ -78,13 +78,12 @@ const median = await page.textContent('#stat-median');
 const runs = await page.textContent('#stat-runs');
 console.log('Journal median offset:', median, '| runs played:', runs);
 
-console.log('--- Settings: toggle dark theme, reduce motion, colorblind mode ---');
+console.log('--- Settings: toggle dark theme, reduce motion ---');
 await page.click('#screen-journal .back-home');
 await page.waitForTimeout(100);
 await page.click('#open-settings');
 await page.waitForTimeout(100);
 await page.check('#setting-motion');
-await page.check('#setting-colorblind');
 await page.click('input[name="theme"][value="dark"]');
 await page.waitForTimeout(200);
 await page.screenshot({ path: 'qa/screenshots/05-settings-dark.png' });

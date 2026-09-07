@@ -244,7 +244,7 @@ Each phase names objectives, deliverables, success criteria, the tests that gate
 - Streak counter with a small number of earned streak-freezes
 - Text/emoji shareable result card with Web Share API / clipboard fallback
 - Zero-text, single-hint-pulse onboarding
-- Settings: sound, haptics, reduce motion, colorblind-safe mode, theme override
+- Settings: sound, haptics, reduce motion, theme override
 - Full offline playability via PWA/service worker
 - Zero monetization, zero server backend, zero server leaderboard
 
@@ -332,7 +332,7 @@ The MVP is precisely the P0 list above — restated here as a single acceptance 
 - [x] The Precision Journal persists locally and displays median offset, consistency, longest streak, and total Perfects. *`test/storage.test.js`; `qa/browser-check.mjs` reads the rendered values back.*
 - [x] A streak counter persists locally, counts participation (not performance), and a small number of freezes are earned (never purchasable). *`test/storage.test.js`, including a regression test for a real bug caught in review: streak-freeze milestones were tracked over the player's lifetime instead of per-streak.*
 - [x] The Result screen offers a plain text/emoji share card via Web Share API with a clipboard fallback — no rendered image, no extra confirmation step. *`test/share.test.js`; `qa/browser-check.mjs` confirms the actual clipboard contents after a share.*
-- [x] Settings include independent Sound, Haptics, Reduce Motion, Colorblind-Safe Mode, and Theme (auto/light/dark) toggles, all applying instantly. *`qa/browser-check.mjs` toggles each and confirms both the DOM state and persistence across reload.*
+- [x] Settings include independent Sound, Haptics, Reduce Motion, and Theme (auto/light/dark) toggles, all applying instantly. *`qa/browser-check.mjs` toggles each and confirms both the DOM state and persistence across reload.* (A separate "Colorblind-Safe Mode" toggle existed briefly and was removed — see GAME_DESIGN.md §4 — because its only effect was a decorative outline around the canvas, not an actual change to how the Fair/True bands are distinguished; that distinction is handled unconditionally by band width and shape, not gated behind a setting a player would have to find and enable.)
 - [x] The app is installable as a PWA and fully playable offline after first load. *Verified both at the domain root and staged under a `/Game/`-style subpath (matching how GitHub Pages actually serves a project site) — service worker registers, activates, and serves the app shell with the network disabled in both cases.*
 - [x] Zero ads, zero IAP, zero server backend, zero server leaderboard are present anywhere in the build. *`qa/network-check.mjs` confirms zero outbound requests beyond the static asset fetches for the app shell itself.*
 - [x] The full automated (Playwright + unit) test suite passes (41 unit tests + 4 Playwright scripts, all green; wired into CI via `.github/workflows/test.yml`).

@@ -343,16 +343,6 @@ body {
   padding-bottom: var(--space-1);
 }
 
-/* Colorblind-safe mode: strengthens shape/pattern redundancy already present
-   by default (docs/GAME_DESIGN.md §3.2, §4) with an outline on the canvas
-   region and higher-contrast band edges - the actual redundant encoding
-   (band width difference, distinct glyph shapes in the share card) is
-   always on regardless of this toggle. */
-body.colorblind-safe #canvas {
-  outline: 2px solid var(--text-muted);
-  outline-offset: 4px;
-}
-
 /* Reduced motion: disable the pulse/scale transitions used elsewhere in the
    UI shell. The canvas's own feedback pulse is separately gated in render.js
    using the same setting, since it isn't a CSS transition. */

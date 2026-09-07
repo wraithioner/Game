@@ -54,7 +54,6 @@ function showScreen(name) {
 // ---- Settings application ---------------------------------------------------
 
 function applySettingsToDom() {
-  document.body.classList.toggle('colorblind-safe', settings.colorblindSafe);
   document.body.classList.toggle('reduce-motion', settings.reduceMotion);
   const root = document.documentElement;
   if (settings.theme === 'auto') {
@@ -66,7 +65,6 @@ function applySettingsToDom() {
   document.getElementById('setting-sound').checked = settings.soundEnabled;
   document.getElementById('setting-haptics').checked = settings.hapticsEnabled;
   document.getElementById('setting-motion').checked = settings.reduceMotion;
-  document.getElementById('setting-colorblind').checked = settings.colorblindSafe;
   document.querySelectorAll('input[name="theme"]').forEach((el) => {
     el.checked = el.value === settings.theme;
   });
@@ -88,12 +86,6 @@ function wireSettings() {
     saveSettings(settings);
     applySettingsToDom();
     track('settings_changed', { settingName: 'reduceMotion', newValue: e.target.checked });
-  });
-  document.getElementById('setting-colorblind').addEventListener('change', (e) => {
-    settings = { ...settings, colorblindSafe: e.target.checked };
-    saveSettings(settings);
-    applySettingsToDom();
-    track('settings_changed', { settingName: 'colorblindSafe', newValue: e.target.checked });
   });
   document.querySelectorAll('input[name="theme"]').forEach((el) => {
     el.addEventListener('change', () => {
