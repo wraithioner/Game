@@ -24,6 +24,17 @@
 > within a circular tunnel cross-section, viewed from a 3rd-person chase
 > camera, with a boost as the one special move (no jump/slide). This document
 > now describes that corrected design, which is what's actually implemented.
+>
+> **Third revision note:** the second build's camera was still a hand-rolled
+> 2D-canvas perspective trick (manual projection math over flat shapes), and
+> it read as flat and unconvincing rather than as a real 3D scene. The
+> rendering layer was rebuilt on three.js/WebGL - a genuine 3D scene with
+> real depth shading and camera projection, matching how the real Dookey
+> Dash itself is built (per `RESEARCH.md`'s research addendum) - vendored
+> locally rather than loaded from a CDN so the PWA's offline guarantee
+> (§1.14) isn't compromised. `game.js`'s simulation itself didn't change at
+> all in this revision (it was already pure 2D/distance math, decoupled from
+> rendering); only `render.js` was rebuilt.
 
 ## 0. Product Identity
 
@@ -213,14 +224,15 @@ fires, so it never desyncs from the actual collision-relevant game state.
 
 ### 3.1 Principles
 
-Minimalist geometric: flat shapes and silhouettes, no illustrated character,
-no textures. Every obstacle type must be distinguishable by shape alone,
-never by color alone (colorblind-safe by construction, not by an add-on
-mode — see §4). The camera itself is a pseudo-3D chase view down a receding
-tunnel (see §3.6) — a real perspective-divide projection drawn with plain 2D
-canvas primitives (arcs, lines, simple polygons), not a 3D engine or any
-textured/lit rendering, so the "minimalist geometric" mandate extends to the
-camera trick itself, not just to individual sprites.
+Minimalist geometric: flat, untextured primitive shapes (boxes, octahedrons,
+simple line geometry), no illustrated character. Every obstacle type must be
+distinguishable by shape alone, never by color alone (colorblind-safe by
+construction, not by an add-on mode — see §4). The scene is genuinely
+rendered in 3D via three.js/WebGL (see §3.6), not a 2D-canvas illusion — real
+depth, real camera projection, basic ambient+directional lighting for shape
+definition — so the "minimalist geometric" mandate applies to *what* is
+modeled (simple primitives, no textures or complex materials), not to how
+it's projected to the screen.
 
 ### 3.2 Color
 
@@ -256,18 +268,24 @@ custom properties.
 
 ### 3.6 Motion Design
 
-The camera is a pseudo-3D chase view: a perspective-divide projection
-(`scale = CAMERA_Z / (CAMERA_Z + aheadDistance)`) maps every obstacle's
-tunnel-relative position and the tunnel's own concentric depth rings onto
-screen space, so distant obstacles shrink toward a vanishing point near the
-top of the screen and grow as they approach — a real "flying down a tube"
-depth cue built entirely from 2D canvas arcs and lines, not a 3D engine (see
-`render.js`). The tunnel's depth-ring phase scrolls proportionally to
-distance traveled, so speed is visually legible even during an
-obstacle-free stretch. Under Reduce Motion, that scroll is frozen and
-obstacle spin animation is disabled (this information is secondary, not
-safety-critical) while the underlying gameplay and the boost glow indicator
-remain fully visible.
+A fixed third-person chase camera (a real `THREE.PerspectiveCamera`) sits
+just behind and above the player, pitched down just enough that the player
+lands low in frame (`DESIRED_PLAYER_SCREEN_Y`, derived - not hand-picked -
+along with the tunnel's world-space radius, so steering to the disc's rim
+can never push the player mesh outside the camera's frustum; an earlier
+build had exactly that bug from a hand-picked radius). The camera itself
+never moves - matching the real Dookey Dash's own architecture, per
+`RESEARCH.md`'s research addendum ("the world moves through you, the
+player's Z is always 0") - only the player mesh's position within the
+tunnel and every obstacle's relative depth (`-(obstacle.position -
+distance) * FORWARD_SCALE`) are recomputed each frame, so nothing needs
+regenerating and there's no unbounded-coordinate drift even across a very
+long practice run. A ring of `THREE.LineLoop` circles cycles toward the
+camera (positioned via `distance % RING_SPACING_WORLD`) as the real motion
+cue; static longitudinal spokes complete the tunnel silhouette. Under
+Reduce Motion, the ring cycle freezes and obstacle spin is disabled (this
+information is secondary, not safety-critical) while the underlying
+gameplay and the boost glow indicator remain fully visible.
 
 ## 4. Eye-Comfort & Accessibility Specification
 

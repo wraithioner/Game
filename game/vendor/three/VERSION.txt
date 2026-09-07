@@ -1,0 +1,3 @@
+three.js 0.185.1 (build/three.module.min.js), vendored from npm rather than
+loaded from a CDN so the service worker can cache it for full offline play.
+MIT licensed - see LICENSE in this directory.

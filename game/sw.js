@@ -25,6 +25,8 @@ const APP_SHELL = [
   './src/share.js',
   './src/storage.js',
   './src/analytics.js',
+  './vendor/three/three.module.min.js',
+  './vendor/three/three.core.min.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

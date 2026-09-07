@@ -54,18 +54,25 @@ assumption before committing to app-store distribution and native tooling.
 
 ### Client architecture (MVP)
 
-Plain ES modules, no build step, no framework, no bundler:
+Plain ES modules, no build step, no framework, no bundler. One real runtime
+dependency — three.js, for actual WebGL 3D rendering — vendored locally
+(`vendor/three/`) rather than pulled from a CDN or package manager at build
+time, so it stays within the "no build step" architecture and, critically,
+so the service worker can cache it for full offline play (see Backend
+below and `GAME_DESIGN.md` §1.14):
 
-- `game.js` — pure deterministic simulation (`SwerveRun`, `createRow`,
-  `speedAtDistance`). No DOM access, fully unit-testable.
+- `game.js` — pure deterministic simulation (`SwerveRun`, `createCheckpoint`,
+  `speedAtDistance`). No DOM access, no rendering-library dependency, fully
+  unit-testable in plain Node.
 - `rng.js` — seeded PRNG and seed derivation (`mulberry32`, `dailySeed`,
   `practiceSeed`, `childSeed`).
-- `render.js` — canvas drawing only; reads game state, never decides
-  outcomes. Colors are read live from CSS custom properties (single source
-  of truth — a duplicated-palette bug in the previous concept's light theme
-  is exactly why this indirection exists).
-- `input.js` — swipe-gesture and keyboard event handling, translated to
-  plain callback invocations.
+- `render.js` — the only module that imports three.js. Builds and updates a
+  real WebGL scene each frame; reads game state, never decides outcomes.
+  Colors are read live from CSS custom properties (single source of truth —
+  a duplicated-palette bug in an earlier revision's light theme is exactly
+  why this indirection exists).
+- `input.js` — continuous drag-to-steer pointer tracking and keyboard event
+  handling, translated to plain position/callback values.
 - `audio.js` — synthesized Web Audio tones + Vibration API haptics.
 - `share.js` — plain-text share-card construction and the native
   share/clipboard fallback chain.
@@ -91,9 +98,12 @@ runtime files actually needed to serve the game.
 
 ### Performance targets
 
-60fps canvas rendering on mid-tier mobile hardware; the difficulty ramp's
-hard speed ceiling (`MAX_SPEED`) and the `VIEW_DISTANCE` fairness margin are
-both tuned assuming worst-case input latency, not best-case.
+60fps WebGL rendering on mid-tier mobile hardware; the scene is deliberately
+cheap (a dozen pooled untextured primitive meshes, simple line geometry for
+the tunnel, no shadows) specifically so it stays comfortably within that
+budget rather than needing later optimization. The difficulty ramp's hard
+speed ceiling (`MAX_SPEED`) and the `VIEW_DISTANCE` fairness margin are both
+tuned assuming worst-case input latency, not best-case.
 
 ## Analytics Specification
 
@@ -190,8 +200,9 @@ through.
 - **Audio:** all sound is originally synthesized in-engine (Web Audio
   oscillators, `GAME_DESIGN.md` §5), specifically to avoid any
   licensed-audio review burden.
-- **Open-source licenses:** the game itself ships zero runtime dependencies
-  (plain ES modules); Playwright is a QA-only dev dependency, not shipped.
+- **Open-source licenses:** the game ships one runtime dependency, three.js
+  (MIT licensed), vendored at `game/vendor/three/` with its license file
+  alongside it. Playwright is a QA-only dev dependency, not shipped.
 
 ### Refunds & purchase expectations
 

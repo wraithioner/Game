@@ -35,6 +35,7 @@ jobs:
           cp game/index.html game/styles.css game/manifest.json game/sw.js game/robots.txt site/
           cp -r game/src site/src
           cp -r game/icons site/icons
+          cp -r game/vendor site/vendor
 
       - name: Version the service worker cache with this commit's SHA
         # Ties cache invalidation to the deployed commit automatically, so a

@@ -18,7 +18,7 @@ import {
 } from './storage.js';
 import { buildShareText, shareResult, checkpointStripFor, dayIndexFromUtcDate } from './share.js';
 import { playCue, unlockAudio } from './audio.js';
-import { drawFrame } from './render.js';
+import { initRenderer, resizeRenderer, drawFrame } from './render.js';
 import { listenForSteering } from './input.js';
 import { track, getRecentEvents } from './analytics.js';
 
@@ -41,7 +41,7 @@ document.querySelectorAll('[data-screen]').forEach((el) => {
 });
 
 const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+initRenderer(canvas);
 
 // ---- Screen management ------------------------------------------------------
 
@@ -178,17 +178,19 @@ let showFirstRunHint = false;
 const boostButton = document.getElementById('boost-btn');
 
 function setupCanvasResolution() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  canvas.width = BASE_WIDTH * dpr;
-  canvas.height = BASE_HEIGHT * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { width: BASE_WIDTH, height: BASE_HEIGHT };
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // The canvas is sized responsively by CSS (styles.css's #canvas rule), not
+  // a fixed logical resolution, so the renderer/camera must be sized from
+  // its actual rendered CSS box - clientWidth/Height is 0 while the Run
+  // screen is hidden (display:none), which is fine, since the fallback here
+  // is only ever visible before a run screen is first shown.
+  const width = canvas.clientWidth || BASE_WIDTH;
+  const height = canvas.clientHeight || BASE_HEIGHT;
+  resizeRenderer(width, height, dpr);
 }
 
-let canvasLogicalSize = setupCanvasResolution();
-window.addEventListener('resize', () => {
-  canvasLogicalSize = setupCanvasResolution();
-});
+setupCanvasResolution();
+window.addEventListener('resize', setupCanvasResolution);
 
 function startRun(mode) {
   const seed = mode === 'daily' ? dailySeed(new Date()) : practiceSeed();
@@ -203,6 +205,7 @@ function startRun(mode) {
   if (showFirstRunHint) track('first_run_demo_seen', {});
 
   showScreen('run');
+  setupCanvasResolution(); // the canvas was hidden (display:none) until now, so re-measure its real size
   updateHud();
 
   if (steeringInput) steeringInput.destroy();
@@ -254,7 +257,7 @@ function renderLoop(nowPerf) {
 
   const outcome = activeRun.tick(dtSeconds);
 
-  drawFrame(ctx, canvasLogicalSize, {
+  drawFrame({
     position: outcome.position,
     boosting: outcome.boosting,
     distance: outcome.distance,

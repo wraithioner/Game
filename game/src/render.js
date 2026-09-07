@@ -1,187 +1,226 @@
-// Canvas rendering for the tunnel. Purely visual - collision truth lives
-// entirely in game.js; this only ever reads state, never decides outcomes.
+// Real WebGL 3D rendering of the tunnel via three.js (vendored locally at
+// vendor/three/, not loaded from a CDN, so the service worker can cache it
+// for full offline play - see docs/RESEARCH.md's research addendum: the
+// real Dookey Dash is itself a Three.js/WebGL scene, and a hand-rolled 2D
+// canvas perspective trick read as flat and unconvincing by comparison).
 // Colors are read live from the page's CSS custom properties (styles.css)
 // rather than duplicated here, so there is exactly one place the palette is
-// defined (docs/PRODUCT_PLAN.md - Technical Architecture explains why, from
-// a bug this caused in an earlier build).
+// defined (docs/PRODUCT_PLAN.md - Technical Architecture).
 //
-// The view is a pseudo-3D chase camera looking down a receding tunnel - a
-// real perspective-divide projection (scale = CAMERA_Z / (CAMERA_Z + depth))
-// drawn with plain 2D canvas primitives (arcs, lines, simple polygons), not
-// a 3D engine. This matches the real Dookey Dash's camera framing (see
-// docs/RESEARCH.md's research addendum) while staying within the minimalist
-// geometric mandate - no textures, no lighting, just projected flat shapes.
+// Coordinate scheme: nothing here uses absolute world position for anything
+// that scrolls. The camera sits fixed at the origin's Z (matching the real
+// game's own architecture, per the reverse-engineering research: "the world
+// moves through you, the player's Z is always 0") and every obstacle's
+// depth is computed fresh each frame as `-(obstacle.position - distance) *
+// FORWARD_SCALE` - a small, bounded quantity (at most VIEW_DISTANCE away),
+// so there's no unbounded-coordinate drift even across a very long practice
+// run. The tunnel's depth rings use the same trick, cycling via `distance %
+// RING_SPACING_WORLD`, so nothing is ever regenerated or grows unbounded.
 
-const CAMERA_Z = 25; // perspective-divide constant: larger = flatter/less dramatic depth
-const VANISH_Y_FRAC = 0.22; // vanishing point Y, as a fraction of canvas height
-const NEAR_Y_FRAC = 0.88; // the player's fixed on-screen Y, as a fraction of canvas height
-const NEAR_RADIUS_FRAC = 0.42; // tunnel's on-screen radius at the player's depth, as a fraction of width
-const TUNNEL_RING_SPACING = 20; // distance units between drawn depth rings
-const TUNNEL_SPOKE_COUNT = 8;
-const OBSTACLE_BASE_RADIUS_FRAC = 0.16; // obstacle drawn size at the near plane, as a fraction of width
-const PLAYER_BASE_RADIUS_FRAC = 0.09;
+import * as THREE from '../vendor/three/three.module.min.js';
 
-export function getPalette() {
+// The canvas keeps a fixed 3:5 (0.6) aspect ratio via CSS regardless of
+// device (styles.css's #canvas rule), so the frustum math below can safely
+// assume that aspect exactly, rather than a live-measured value.
+const CANVAS_ASPECT = 0.6;
+const CAMERA_FOV_DEGREES = 60; // vertical FOV
+const CAMERA_HEIGHT = 2.2;
+const CAMERA_BACK = 4.5; // camera sits this far behind the player's z=0 plane
+// Where the player should land on screen: 0 = top edge, 0.5 = dead center, 1
+// = bottom edge. A classic runner keeps the player low in frame so most of
+// the screen shows the track receding ahead, not behind-camera empty space.
+const DESIRED_PLAYER_SCREEN_Y = 0.74;
+
+// WORLD_RADIUS (world units the normalized, radius-1 disc maps onto) is
+// DERIVED, not hand-picked: it must stay small enough that a player at the
+// disc's rim (the most extreme legal position) is still comfortably inside
+// the camera's frustum at its own depth (CAMERA_BACK) - otherwise steering
+// to the edge would visibly push the player mesh off-screen, which is
+// exactly the bug an earlier hand-picked WORLD_RADIUS=3 had. FRUSTUM_MARGIN
+// keeps the full disc within ~77% of the frustum's width at that depth, so
+// there's always a visible margin, not just an exact fit.
+const FRUSTUM_MARGIN = 1.1;
+const verticalHalfFovRad = (CAMERA_FOV_DEGREES / 2) * (Math.PI / 180);
+const horizontalHalfFovRad = Math.atan(Math.tan(verticalHalfFovRad) * CANVAS_ASPECT);
+const WORLD_RADIUS = (CAMERA_BACK * Math.tan(horizontalHalfFovRad)) / FRUSTUM_MARGIN;
+
+const FORWARD_SCALE = (WORLD_RADIUS / 3) * 0.15; // world units per game distance-unit, scaled with WORLD_RADIUS
+const RING_SPACING_WORLD = WORLD_RADIUS * 0.68;
+const RING_COUNT = 18; // enough to keep the rings visually dense over the full TUNNEL_VISUAL_LENGTH below
+const SPOKE_COUNT = 8;
+const TUNNEL_VISUAL_LENGTH = WORLD_RADIUS * 16; // reaches far enough that the tunnel visibly recedes toward
+// a real vanishing point instead of the ring/spoke geometry stopping well short of it and leaving bare
+// background above - independent of ring spacing, just how far the spoke lines/lookAt target reach.
+const OBSTACLE_POOL_SIZE = 12; // comfortably above the max obstacles ever visible at once
+const BOOST_GLOW_COLOR = 0xfff3c4; // warm bright glow, visible against either theme's dark or light player color
+
+let renderer = null;
+let scene = null;
+let camera = null;
+let playerMesh = null;
+let playerMaterial = null;
+let boostLight = null;
+let ringLines = [];
+let hazardPool = [];
+let barrierPool = [];
+let paletteCache = null;
+
+function getPalette() {
   const styles = getComputedStyle(document.documentElement);
   const token = (name) => styles.getPropertyValue(name).trim();
   return {
     bg: token('--bg'),
     track: token('--ring'),
     player: token('--accent-primary'),
-    hazard: token('--accent-danger'), // violet - never clearable, must be steered around
-    barrier: token('--accent-true'), // amber - clearable only while boosting
-    text: token('--text'),
+    hazard: token('--accent-danger'), // never clearable, must be steered around
+    barrier: token('--accent-true'), // clearable only while boosting
   };
 }
 
-/** Perspective-divide projection: 1 right at the camera, shrinking toward 0
- * as depth increases. Also used to interpolate Y between the vanishing
- * point and the near (player) plane at the same depth. */
-function projectionScale(aheadDistance) {
-  return CAMERA_Z / (CAMERA_Z + Math.max(aheadDistance, 0));
+function circlePoints(radius, segments, z) {
+  const points = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    points.push(new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, z));
+  }
+  return points;
+}
+
+function buildTunnel(trackColor) {
+  const group = new THREE.Group();
+  const lineMaterial = new THREE.LineBasicMaterial({ color: trackColor, transparent: true, opacity: 0.5 });
+
+  ringLines = [];
+  for (let i = 0; i < RING_COUNT; i++) {
+    const geometry = new THREE.BufferGeometry().setFromPoints(circlePoints(WORLD_RADIUS, 32, 0));
+    const ring = new THREE.LineLoop(geometry, lineMaterial);
+    group.add(ring);
+    ringLines.push(ring);
+  }
+
+  const spokeMaterial = new THREE.LineBasicMaterial({ color: trackColor, transparent: true, opacity: 0.3 });
+  for (let i = 0; i < SPOKE_COUNT; i++) {
+    const angle = (i / SPOKE_COUNT) * Math.PI * 2;
+    const far = new THREE.Vector3(Math.cos(angle) * WORLD_RADIUS, Math.sin(angle) * WORLD_RADIUS, -TUNNEL_VISUAL_LENGTH);
+    const near = new THREE.Vector3(Math.cos(angle) * WORLD_RADIUS, Math.sin(angle) * WORLD_RADIUS, CAMERA_BACK);
+    const geometry = new THREE.BufferGeometry().setFromPoints([near, far]);
+    group.add(new THREE.Line(geometry, spokeMaterial));
+  }
+
+  return group;
+}
+
+function buildObstaclePool(geometry, color) {
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05 });
+  const pool = [];
+  for (let i = 0; i < OBSTACLE_POOL_SIZE; i++) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.visible = false;
+    scene.add(mesh);
+    pool.push(mesh);
+  }
+  return pool;
+}
+
+/** Builds the scene once for the given canvas. Safe to call again if the
+ * canvas element itself ever changes (it doesn't in this app, but this
+ * keeps the module free of a "must call exactly once" footgun). */
+export function initRenderer(canvas) {
+  paletteCache = getPalette();
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(paletteCache.bg);
+
+  camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEGREES, CANVAS_ASPECT, 0.1, 100);
+  camera.position.set(0, CAMERA_HEIGHT, CAMERA_BACK);
+  // Pitch the camera down just enough that the player (at world y=0, z=0)
+  // actually lands at DESIRED_PLAYER_SCREEN_Y, rather than picking a lookAt
+  // target by eye - see the constant's comment for why that placement matters.
+  const angleToPlayer = Math.atan(CAMERA_HEIGHT / CAMERA_BACK);
+  const angleFromCenter = (DESIRED_PLAYER_SCREEN_Y - 0.5) * 2 * verticalHalfFovRad;
+  const pitchDownRad = angleToPlayer - angleFromCenter;
+  const lookDistance = CAMERA_BACK + TUNNEL_VISUAL_LENGTH;
+  const lookAtY = CAMERA_HEIGHT - Math.tan(pitchDownRad) * lookDistance;
+  camera.lookAt(0, lookAtY, -TUNNEL_VISUAL_LENGTH);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const directional = new THREE.DirectionalLight(0xffffff, 0.6);
+  directional.position.set(1.5, 3, 2);
+  scene.add(directional);
+
+  // Fixed, theme-independent glow color - using the player's own base color
+  // here would be invisible whenever that color is dark (as it is in the
+  // light theme), since a dark emissive tint doesn't add visible brightness.
+  boostLight = new THREE.PointLight(BOOST_GLOW_COLOR, 0, 4);
+  scene.add(boostLight);
+
+  scene.add(buildTunnel(paletteCache.track));
+
+  const playerSize = WORLD_RADIUS * 0.16;
+  playerMaterial = new THREE.MeshStandardMaterial({ color: paletteCache.player, roughness: 0.5, metalness: 0.1 });
+  playerMesh = new THREE.Mesh(new THREE.BoxGeometry(playerSize, playerSize, playerSize), playerMaterial);
+  playerMesh.position.set(0, 0, 0);
+  scene.add(playerMesh);
+
+  hazardPool = buildObstaclePool(new THREE.OctahedronGeometry(WORLD_RADIUS * 0.12), paletteCache.hazard);
+  barrierPool = buildObstaclePool(
+    new THREE.BoxGeometry(WORLD_RADIUS * 0.3, WORLD_RADIUS * 0.11, WORLD_RADIUS * 0.07),
+    paletteCache.barrier
+  );
+}
+
+// The projection's aspect is fixed at CANVAS_ASPECT rather than recomputed
+// from live measurements - WORLD_RADIUS above is derived assuming exactly
+// this aspect, so the frustum-containment guarantee only holds if the
+// projection actually uses it. The canvas's own CSS aspect-ratio keeps its
+// rendered box at this same ratio regardless of viewport size.
+export function resizeRenderer(width, height, dpr) {
+  if (!renderer) return;
+  renderer.setPixelRatio(Math.min(dpr, 2));
+  renderer.setSize(width, height, false);
+  camera.aspect = CANVAS_ASPECT;
+  camera.updateProjectionMatrix();
 }
 
 /**
- * @param {CanvasRenderingContext2D} ctx
- * @param {{width: number, height: number}} size - logical (CSS pixel) canvas size
  * @param {{position: {x:number,y:number}, boosting: boolean, distance: number, visibleObstacles: object[], reduceMotion: boolean}} state
  */
-export function drawFrame(ctx, size, state) {
+export function drawFrame(state) {
   const { position, boosting, distance, visibleObstacles, reduceMotion } = state;
-  const palette = getPalette();
-  const { width, height } = size;
-  const centerX = width / 2;
-  const vanishY = height * VANISH_Y_FRAC;
-  const nearY = height * NEAR_Y_FRAC;
-  const nearRadiusPx = width * NEAR_RADIUS_FRAC;
 
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = palette.bg;
-  ctx.fillRect(0, 0, width, height);
+  playerMesh.position.set(position.x * WORLD_RADIUS, position.y * WORLD_RADIUS, 0);
 
-  drawTunnel(ctx, palette, centerX, vanishY, nearY, nearRadiusPx, distance, reduceMotion);
+  const glowTarget = boosting ? 1 : 0;
+  const pulse = boosting && !reduceMotion ? 0.75 + 0.25 * Math.sin(performance.now() / 60) : 1;
+  playerMaterial.emissive.set(boosting ? BOOST_GLOW_COLOR : 0x000000);
+  playerMaterial.emissiveIntensity = boosting ? 0.6 * pulse : 0;
+  boostLight.intensity = glowTarget * 1.2 * pulse;
+  boostLight.position.copy(playerMesh.position);
 
-  // Farthest obstacles first, so nearer ones correctly draw on top of them.
-  const sorted = [...visibleObstacles].sort((a, b) => b.position - a.position);
-  for (const obstacle of sorted) {
-    const aheadDistance = obstacle.position - distance;
-    const scale = projectionScale(aheadDistance);
-    const depthY = vanishY + (nearY - vanishY) * scale;
-    const radiusPx = nearRadiusPx * scale;
+  const ringPhase = reduceMotion ? 0 : (distance * FORWARD_SCALE) % RING_SPACING_WORLD;
+  ringLines.forEach((ring, i) => {
+    ring.position.z = -(i * RING_SPACING_WORLD - ringPhase);
+  });
+
+  placeObstacles(hazardPool, visibleObstacles.filter((o) => o.type === 'hazard'), distance, reduceMotion);
+  placeObstacles(barrierPool, visibleObstacles.filter((o) => o.type === 'barrier'), distance, reduceMotion);
+
+  renderer.render(scene, camera);
+}
+
+function placeObstacles(pool, obstacles, distance, reduceMotion) {
+  obstacles.forEach((obstacle, i) => {
+    const mesh = pool[i];
+    if (!mesh) return; // beyond the pool size - would need a wider VIEW_DISTANCE/pool to ever happen
     const ox = Math.cos(obstacle.angle) * obstacle.radius;
     const oy = Math.sin(obstacle.angle) * obstacle.radius;
-    const screenX = centerX + ox * radiusPx;
-    const screenY = depthY + oy * radiusPx;
-    const drawSize = width * OBSTACLE_BASE_RADIUS_FRAC * scale;
-    drawObstacle(ctx, palette, obstacle.type, screenX, screenY, drawSize, distance, reduceMotion);
-  }
-
-  drawPlayer(ctx, palette, centerX + position.x * nearRadiusPx, nearY + position.y * nearRadiusPx, width * PLAYER_BASE_RADIUS_FRAC, boosting, reduceMotion);
-}
-
-function drawTunnel(ctx, palette, centerX, vanishY, nearY, nearRadiusPx, distance, reduceMotion) {
-  ctx.strokeStyle = palette.track;
-  ctx.lineWidth = 1.5;
-
-  // Concentric depth rings, receding toward the vanishing point. The ring
-  // phase scrolls with distance so the tunnel visibly moves even during an
-  // obstacle-free stretch - frozen under Reduce Motion since it also carries
-  // real information (how fast you're currently going), same rationale as
-  // the lane-divider scroll in the previous build.
-  const phase = reduceMotion ? 0 : distance % TUNNEL_RING_SPACING;
-  for (let d = -phase; d <= 100; d += TUNNEL_RING_SPACING) {
-    if (d < 0) continue;
-    const scale = projectionScale(d);
-    const depthY = vanishY + (nearY - vanishY) * scale;
-    const radiusPx = nearRadiusPx * scale;
-    ctx.globalAlpha = 0.5 * scale + 0.15;
-    ctx.beginPath();
-    ctx.arc(centerX, depthY, Math.max(radiusPx, 0.5), 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  // Radial spokes from the vanishing point to the near-plane rim - a
-  // simplified but effective "converging lines" depth cue.
-  ctx.globalAlpha = 0.35;
-  for (let i = 0; i < TUNNEL_SPOKE_COUNT; i++) {
-    const angle = (i / TUNNEL_SPOKE_COUNT) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(centerX, vanishY);
-    ctx.lineTo(centerX + Math.cos(angle) * nearRadiusPx, nearY + Math.sin(angle) * nearRadiusPx);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawObstacle(ctx, palette, type, x, y, size, distance, reduceMotion) {
-  ctx.save();
-  ctx.translate(x, y);
-
-  if (type === 'hazard') {
-    // A spinning 4-pointed cross - the never-clearable hazard, distinct in
-    // both color and silhouette (a "danger" star shape) from the barrier.
-    if (!reduceMotion) ctx.rotate((distance * 0.06) % (Math.PI * 2));
-    ctx.fillStyle = palette.hazard;
-    drawCross(ctx, size);
-  } else {
-    // A plain rectangular "plank" - the boost-through barrier.
-    ctx.fillStyle = palette.barrier;
-    roundRect(ctx, -size, -size * 0.4, size * 2, size * 0.8, size * 0.15);
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-function drawCross(ctx, size) {
-  const arm = size * 0.42;
-  ctx.beginPath();
-  ctx.moveTo(-arm, -size);
-  ctx.lineTo(arm, -size);
-  ctx.lineTo(arm, -arm);
-  ctx.lineTo(size, -arm);
-  ctx.lineTo(size, arm);
-  ctx.lineTo(arm, arm);
-  ctx.lineTo(arm, size);
-  ctx.lineTo(-arm, size);
-  ctx.lineTo(-arm, arm);
-  ctx.lineTo(-size, arm);
-  ctx.lineTo(-size, -arm);
-  ctx.lineTo(-arm, -arm);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawPlayer(ctx, palette, x, y, size, boosting, reduceMotion) {
-  if (boosting) {
-    // A soft glow behind the player - static (not pulsing) under Reduce
-    // Motion, so the boost state stays visible without relying on animation.
-    ctx.save();
-    ctx.globalAlpha = reduceMotion ? 0.35 : 0.35 + 0.15 * Math.sin(performance.now() / 60);
-    ctx.fillStyle = palette.player;
-    ctx.beginPath();
-    ctx.arc(x, y, size * 1.8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.fillStyle = palette.player;
-  roundRect(ctx, x - size, y - size, size * 2, size * 2, size * 0.35);
-  ctx.fill();
-}
-
-function roundRect(ctx, x, y, w, h, radius) {
-  const r = Array.isArray(radius) ? radius : [radius, radius, radius, radius];
-  ctx.beginPath();
-  ctx.moveTo(x + r[0], y);
-  ctx.lineTo(x + w - r[1], y);
-  ctx.arcTo(x + w, y, x + w, y + r[1], r[1]);
-  ctx.lineTo(x + w, y + h - r[2]);
-  ctx.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]);
-  ctx.lineTo(x + r[3], y + h);
-  ctx.arcTo(x, y + h, x, y + h - r[3], r[3]);
-  ctx.lineTo(x, y + r[0]);
-  ctx.arcTo(x, y, x + r[0], y, r[0]);
-  ctx.closePath();
+    mesh.position.set(ox * WORLD_RADIUS, oy * WORLD_RADIUS, -(obstacle.position - distance) * FORWARD_SCALE);
+    if (obstacle.type === 'hazard' && !reduceMotion) {
+      mesh.rotation.y = distance * 0.08;
+      mesh.rotation.x = distance * 0.05;
+    }
+    mesh.visible = true;
+  });
+  for (let i = obstacles.length; i < pool.length; i++) pool[i].visible = false;
 }
