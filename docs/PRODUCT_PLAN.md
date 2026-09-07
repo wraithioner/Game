@@ -2,13 +2,17 @@
 
 > **Provenance note:** this is Swerve's product plan, written after a direct
 > product override replaced the researched-and-validated concept (Ringtrue)
-> with an endless 3-lane obstacle-dodge runner. See `GAME_DESIGN.md`'s
-> provenance note and `RESEARCH.md`'s pivot addendum for the full context.
-> Sections that describe decisions independent of the specific core
-> mechanic — the zero-backend architecture, the monetization-free MVP scope,
-> the analytics/privacy design, the legal posture on synthesized audio and
-> unprotectable game mechanics — carry over essentially unchanged, because
-> nothing about the pivot touched those decisions' underlying reasoning.
+> with an endless obstacle-dodge runner. See `GAME_DESIGN.md`'s provenance
+> note and `RESEARCH.md`'s pivot addendum for the full context, including a
+> second revision: the first Swerve build used discrete lanes, which turned
+> out not to match the real Dookey Dash (continuous 2D steering in a tunnel,
+> no lanes at all) once actually researched - `GAME_DESIGN.md` describes the
+> corrected design. Sections here that describe decisions independent of the
+> specific core mechanic — the zero-backend architecture, the
+> monetization-free MVP scope, the analytics/privacy design, the legal
+> posture on synthesized audio and unprotectable game mechanics — carry over
+> essentially unchanged across both revisions, because neither pivot touched
+> those decisions' underlying reasoning.
 
 ## Monetization Strategy
 
@@ -197,7 +201,7 @@ Not applicable — no purchases exist in the MVP.
 
 ### Naming, icon, screenshots
 
-Re-skinned for Swerve's 3-lane visual identity (see `game/icons/`); the
+Re-skinned for Swerve's tunnel visual identity (see `game/icons/`); the
 underlying ASO best-practices conclusions from the original research
 (`RESEARCH.md` §5) — clear, literal iconography over abstract branding —
 still apply and were followed in the icon redesign.
@@ -212,7 +216,7 @@ research concluded, before any native-app or store-distribution investment.
 MVP (this build): core loop, daily challenge, streak, share card, PWA/
 offline support, accessibility pass, GitHub Pages deploy. P1/P2 (deferred,
 not committed): cosmetic supporter pack, server-verified leaderboards,
-additional obstacle types/lane counts.
+additional obstacle types.
 
 ## Prioritization
 
@@ -243,8 +247,9 @@ The only ongoing cost is engineering time for future feature work.
 ## Important Things You Didn't Ask About
 
 1. **The fairness guarantee is enforced algorithmically, not just tuned
-   probabilistically** — `createRow()` deterministically demotes an
-   all-wall row to guarantee a survivable lane always exists, verified by an
+   probabilistically** — `createCheckpoint()` deterministically clears the
+   last of the tunnel's 4 quadrants whenever all four would otherwise be
+   blocked, guaranteeing a survivable path always exists, verified by an
    exhaustive test sweep rather than trusted on the strength of the
    probability distribution alone.
 2. **Emoji rendering is inconsistent across platforms** — the share card
@@ -265,7 +270,7 @@ document beyond that scope has been built.
 ## Post-Launch Roadmap
 
 Cosmetic supporter pack; server-verified leaderboards (global + friends);
-additional obstacle archetypes and/or a 4th/5th lane variant mode; deeper
+additional obstacle archetypes and rarity-tiered collectibles; deeper
 per-run replay/analysis in the Journal screen. None of these are committed —
 all are gated on real usage data from the MVP validating the core retention
 hypothesis first.

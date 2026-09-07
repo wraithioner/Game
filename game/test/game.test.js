@@ -1,16 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createRow,
+  createCheckpoint,
   speedAtDistance,
   SwerveRun,
-  LANES,
-  ROW_SPACING,
+  DISC_RADIUS,
+  CHECKPOINT_SPACING,
   BASE_SPEED,
   MAX_SPEED,
   SPEED_RAMP_DISTANCE,
+  BOOST_DURATION,
   DAILY_DISTANCE_CAP,
 } from '../src/game.js';
+
+function toXY(obstacle) {
+  return { x: Math.cos(obstacle.angle) * obstacle.radius, y: Math.sin(obstacle.angle) * obstacle.radius };
+}
+
+function quadrantOf(obstacle) {
+  return Math.floor(obstacle.angle / (Math.PI / 2));
+}
+
+/** Advances a run in small steps (matching how main.js actually drives it,
+ * once per animation frame) until it reaches or passes `targetDistance`, or
+ * ends. Small steps let the steering ease and any boost timer behave
+ * realistically, rather than one giant tick decaying everything at once. */
+function stepUntil(run, targetDistance, step = 1 / 60) {
+  let guard = 0;
+  while (run.status === 'active' && run.distance < targetDistance && guard < 200000) {
+    run.tick(step);
+    guard++;
+  }
+  return run;
+}
 
 test('speedAtDistance ramps from BASE_SPEED to MAX_SPEED and then holds', () => {
   assert.equal(speedAtDistance(0), BASE_SPEED);
@@ -20,53 +42,59 @@ test('speedAtDistance ramps from BASE_SPEED to MAX_SPEED and then holds', () => 
   assert.ok(mid > BASE_SPEED && mid < MAX_SPEED);
 });
 
-test('createRow is deterministic for a given seed and row index', () => {
-  const a = createRow(777, 5);
-  const b = createRow(777, 5);
+test('createCheckpoint is deterministic for a given seed and index', () => {
+  const a = createCheckpoint(777, 5);
+  const b = createCheckpoint(777, 5);
   assert.deepEqual(a, b);
 });
 
-test('createRow varies by row index and by seed', () => {
-  const a = createRow(1, 0);
-  const b = createRow(1, 1);
-  const c = createRow(2, 0);
-  assert.notDeepEqual(a.lanes, b.lanes);
-  assert.notDeepEqual(a.lanes, c.lanes);
+test('createCheckpoint varies by index and by seed', () => {
+  const a = createCheckpoint(1, 0);
+  const b = createCheckpoint(1, 1);
+  const c = createCheckpoint(2, 0);
+  assert.notDeepEqual(a.obstacles, b.obstacles);
+  assert.notDeepEqual(a.obstacles, c.obstacles);
 });
 
-test('createRow always has exactly LANES lanes, each a valid obstacle type', () => {
-  const validTypes = new Set(['empty', 'low', 'high', 'wall']);
+test('checkpoint positions increase strictly by CHECKPOINT_SPACING', () => {
+  const first = createCheckpoint(1, 0);
+  const second = createCheckpoint(1, 1);
+  assert.equal(second.position - first.position, CHECKPOINT_SPACING);
+});
+
+test('every obstacle has a valid type and stays within its own quadrant\'s angular arc', () => {
+  const validTypes = new Set(['hazard', 'barrier']);
   for (let seed = 0; seed < 200; seed++) {
-    const row = createRow(seed, 0);
-    assert.equal(row.lanes.length, LANES);
-    row.lanes.forEach((t) => assert.ok(validTypes.has(t), `invalid type: ${t}`));
+    const checkpoint = createCheckpoint(seed, 0);
+    checkpoint.obstacles.forEach((o) => {
+      assert.ok(validTypes.has(o.type), `invalid type: ${o.type}`);
+      assert.ok(o.angle >= 0 && o.angle < Math.PI * 2, `angle out of range: ${o.angle}`);
+      assert.ok(o.radius > 0 && o.radius <= DISC_RADIUS, `radius out of range: ${o.radius}`);
+    });
   }
 });
 
-test('fairness guarantee: no row ever has all lanes as "wall" (an unavoidable pattern)', () => {
-  // Sweep a large number of seeds and row indices - the weighted random pick
-  // alone would produce all-wall about 0.2^3 = 0.8% of the time, so this
-  // exhaustively checks the deterministic fix-up in createRow actually fires
-  // every time it needs to, not just usually.
+test('fairness guarantee: at least one full quadrant is always completely obstacle-free', () => {
+  // Sweep a large number of seeds and checkpoint indices - the weighted
+  // random pick alone would produce all-4-quadrants-occupied a non-trivial
+  // fraction of the time, so this exhaustively checks the deterministic
+  // fix-up in createCheckpoint actually fires every time it needs to.
   for (let seed = 0; seed < 500; seed++) {
-    for (let rowIndex = 0; rowIndex < 20; rowIndex++) {
-      const row = createRow(seed, rowIndex);
-      const wallCount = row.lanes.filter((t) => t === 'wall').length;
-      assert.ok(wallCount < LANES, `row (seed=${seed}, index=${rowIndex}) has all lanes blocked: ${row.lanes}`);
+    for (let index = 0; index < 20; index++) {
+      const checkpoint = createCheckpoint(seed, index);
+      const occupiedQuadrants = new Set(checkpoint.obstacles.map(quadrantOf));
+      assert.ok(
+        occupiedQuadrants.size < 4,
+        `checkpoint (seed=${seed}, index=${index}) has every quadrant blocked: ${JSON.stringify(checkpoint.obstacles)}`
+      );
     }
   }
 });
 
-test('row positions increase strictly by ROW_SPACING', () => {
-  const first = createRow(1, 0);
-  const second = createRow(1, 1);
-  assert.equal(second.position - first.position, ROW_SPACING);
-});
-
-test('a fresh run starts centered, running, at distance 0', () => {
+test('a fresh run starts centered, not boosting, at distance 0', () => {
   const run = new SwerveRun({ seed: 1, mode: 'practice' });
-  assert.equal(run.lane, 1);
-  assert.equal(run.action, 'running');
+  assert.deepEqual(run.position, { x: 0, y: 0 });
+  assert.equal(run.boosting, false);
   assert.equal(run.distance, 0);
   assert.equal(run.status, 'active');
 });
@@ -75,136 +103,99 @@ test('constructing a run with an invalid mode throws', () => {
   assert.throws(() => new SwerveRun({ seed: 1, mode: 'bogus' }));
 });
 
-test('moveLeft/moveRight clamp to the lane bounds', () => {
+test('setTargetPosition clamps to the unit disc', () => {
   const run = new SwerveRun({ seed: 1, mode: 'practice' });
-  run.moveLeft();
-  assert.equal(run.lane, 0);
-  run.moveLeft(); // already leftmost
-  assert.equal(run.lane, 0);
-  run.moveRight();
-  run.moveRight();
-  assert.equal(run.lane, 2);
-  run.moveRight(); // already rightmost
-  assert.equal(run.lane, 2);
+  run.setTargetPosition(5, 0);
+  assert.ok(Math.hypot(run.targetPosition.x, run.targetPosition.y) <= DISC_RADIUS + 1e-9);
+  assert.ok(run.targetPosition.x > 0.99, 'should clamp toward the same direction, at the rim');
 });
 
-test('jump and slide are mutually exclusive and time out back to running', () => {
+test('position eases toward the target over time rather than snapping instantly', () => {
   const run = new SwerveRun({ seed: 1, mode: 'practice' });
-  run.jump();
-  assert.equal(run.action, 'jumping');
-  run.slide(); // ignored while jumping
-  assert.equal(run.action, 'jumping');
-  run.tick(10); // well past JUMP_DURATION
-  assert.equal(run.action, 'running');
+  run.setTargetPosition(1, 0);
+  run.tick(1 / 60);
+  assert.ok(run.position.x > 0 && run.position.x < 0.5, 'one small tick should move only partway there');
+  for (let i = 0; i < 120; i++) run.tick(1 / 60); // ~2 more seconds, many time constants at STEER_EASE_RATE
+  assert.ok(Math.hypot(run.position.x - 1, run.position.y - 0) < 0.01, 'should have converged close to the target');
 });
 
-/**
- * Advances a run in small steps (matching how main.js actually drives it,
- * once per animation frame) until it reaches or passes `targetDistance`, or
- * ends. A single giant tick() would decay the jump/slide timer using the
- * whole dt before ever checking a row crossing, which is not how the real
- * per-frame game loop behaves - small steps are the realistic simulation.
- */
-function stepUntil(run, targetDistance, step = 1 / 60) {
-  let guard = 0;
-  while (run.status === 'active' && run.distance < targetDistance && guard < 100000) {
-    run.tick(step);
-    guard++;
+test('triggerBoost sets boosting for BOOST_DURATION and then reverts', () => {
+  const run = new SwerveRun({ seed: 1, mode: 'practice' });
+  run.triggerBoost();
+  assert.equal(run.boosting, true);
+  run.tick(BOOST_DURATION - 0.05);
+  assert.equal(run.boosting, true, 'should still be boosting just before the duration elapses');
+  run.tick(0.1);
+  assert.equal(run.boosting, false);
+});
+
+test('a fully clear quadrant is always survivable regardless of boost state', () => {
+  for (let seed = 0; seed < 50; seed++) {
+    const checkpoint = createCheckpoint(seed, 0);
+    const occupied = new Set(checkpoint.obstacles.map(quadrantOf));
+    let clearQuadrant = -1;
+    for (let q = 0; q < 4; q++) {
+      if (!occupied.has(q)) { clearQuadrant = q; break; }
+    }
+    assert.ok(clearQuadrant !== -1, 'fairness guarantee should have produced a clear quadrant');
+
+    const angle = (clearQuadrant + 0.5) * (Math.PI / 2); // dead center of the clear quadrant's arc
+    const target = { x: Math.cos(angle) * 0.65, y: Math.sin(angle) * 0.65 };
+
+    const run = new SwerveRun({ seed, mode: 'practice' });
+    run.setTargetPosition(target.x, target.y);
+    stepUntil(run, CHECKPOINT_SPACING + 1);
+    assert.equal(run.status, 'active', `seed ${seed}: steering into the guaranteed-clear quadrant should survive`);
   }
-  return run;
-}
-
-test('an empty lane is always survivable regardless of action', () => {
-  // Force a known row layout by testing the pure clears() logic indirectly:
-  // drive a run through a seed/rowIndex combination we've verified is empty
-  // in the player's lane, and confirm no collision.
-  const run = new SwerveRun({ seed: 42, mode: 'practice' });
-  const row = createRow(42, 0);
-  const emptyLane = row.lanes.indexOf('empty');
-  if (emptyLane === -1) return; // this seed's first row has no empty lane; skip rather than flake
-  run.lane = emptyLane;
-  stepUntil(run, ROW_SPACING + 1);
-  assert.equal(run.status, 'active');
 });
 
-test('a "low" obstacle collides unless the player is jumping', () => {
-  // Search seeds for a row with a deterministic 'low' obstacle to test against.
+test('a "hazard" obstacle always collides, boosting or not', () => {
   let seed = 0;
-  let row;
-  let lane;
-  while (seed < 100) {
-    row = createRow(seed, 0);
-    lane = row.lanes.indexOf('low');
-    if (lane !== -1) break;
+  let hazard;
+  while (seed < 200) {
+    hazard = createCheckpoint(seed, 0).obstacles.find((o) => o.type === 'hazard');
+    if (hazard) break;
     seed++;
   }
-  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a low obstacle - test setup problem');
+  assert.ok(hazard, 'no seed in range produced a hazard obstacle - test setup problem');
+  const target = toXY(hazard);
 
-  const hit = new SwerveRun({ seed, mode: 'practice' });
-  hit.lane = lane;
-  stepUntil(hit, ROW_SPACING + 1);
-  assert.equal(hit.status, 'ended');
+  const plain = new SwerveRun({ seed, mode: 'practice' });
+  plain.setTargetPosition(target.x, target.y);
+  stepUntil(plain, CHECKPOINT_SPACING + 1);
+  assert.equal(plain.status, 'ended');
 
-  // Jump shortly before reaching the row (not at t=0 - JUMP_DURATION is
-  // short, so the jump must actually be in the air when the row arrives).
-  const cleared = new SwerveRun({ seed, mode: 'practice' });
-  cleared.lane = lane;
-  stepUntil(cleared, ROW_SPACING - 1);
-  cleared.jump();
-  stepUntil(cleared, ROW_SPACING + 1);
-  assert.equal(cleared.status, 'active');
+  const boosted = new SwerveRun({ seed, mode: 'practice' });
+  boosted.setTargetPosition(target.x, target.y);
+  boosted.triggerBoost();
+  stepUntil(boosted, CHECKPOINT_SPACING + 1);
+  assert.equal(boosted.status, 'ended', 'boosting must not clear a hazard');
 });
 
-test('a "high" obstacle collides unless the player is sliding', () => {
+test('a "barrier" obstacle collides unless the player is boosting through it', () => {
   let seed = 0;
-  let row;
-  let lane;
-  while (seed < 100) {
-    row = createRow(seed, 0);
-    lane = row.lanes.indexOf('high');
-    if (lane !== -1) break;
+  let barrier;
+  while (seed < 200) {
+    barrier = createCheckpoint(seed, 0).obstacles.find((o) => o.type === 'barrier');
+    if (barrier) break;
     seed++;
   }
-  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a high obstacle - test setup problem');
+  assert.ok(barrier, 'no seed in range produced a barrier obstacle - test setup problem');
+  const target = toXY(barrier);
 
   const hit = new SwerveRun({ seed, mode: 'practice' });
-  hit.lane = lane;
-  stepUntil(hit, ROW_SPACING + 1);
+  hit.setTargetPosition(target.x, target.y);
+  stepUntil(hit, CHECKPOINT_SPACING + 1);
   assert.equal(hit.status, 'ended');
 
   const cleared = new SwerveRun({ seed, mode: 'practice' });
-  cleared.lane = lane;
-  stepUntil(cleared, ROW_SPACING - 1);
-  cleared.slide();
-  stepUntil(cleared, ROW_SPACING + 1);
+  cleared.setTargetPosition(target.x, target.y);
+  // Converge onto the barrier's position first, then boost shortly before
+  // crossing so the boost is still active at the crossing instant.
+  stepUntil(cleared, CHECKPOINT_SPACING - 1);
+  cleared.triggerBoost();
+  stepUntil(cleared, CHECKPOINT_SPACING + 1);
   assert.equal(cleared.status, 'active');
-});
-
-test('a "wall" obstacle always collides, even while jumping or sliding', () => {
-  let seed = 0;
-  let row;
-  let lane;
-  while (seed < 100) {
-    row = createRow(seed, 0);
-    lane = row.lanes.indexOf('wall');
-    if (lane !== -1) break;
-    seed++;
-  }
-  assert.ok(lane !== -1 && lane !== undefined, 'no seed in range produced a wall obstacle - test setup problem');
-
-  const jumping = new SwerveRun({ seed, mode: 'practice' });
-  jumping.lane = lane;
-  stepUntil(jumping, ROW_SPACING - 1);
-  jumping.jump();
-  stepUntil(jumping, ROW_SPACING + 1);
-  assert.equal(jumping.status, 'ended');
-
-  const sliding = new SwerveRun({ seed, mode: 'practice' });
-  sliding.lane = lane;
-  stepUntil(sliding, ROW_SPACING - 1);
-  sliding.slide();
-  stepUntil(sliding, ROW_SPACING + 1);
-  assert.equal(sliding.status, 'ended');
 });
 
 test('a run that has ended ignores further ticks and input', () => {
@@ -212,11 +203,11 @@ test('a run that has ended ignores further ticks and input', () => {
   run.status = 'ended';
   const before = run.distance;
   run.tick(1);
-  run.moveLeft();
-  run.jump();
+  run.setTargetPosition(1, 1);
+  run.triggerBoost();
   assert.equal(run.distance, before);
-  assert.equal(run.lane, 1);
-  assert.equal(run.action, 'running');
+  assert.deepEqual(run.targetPosition, { x: 0, y: 0 });
+  assert.equal(run.boosting, false);
 });
 
 test('practice mode has no distance cap and does not auto-complete', () => {
@@ -224,60 +215,42 @@ test('practice mode has no distance cap and does not auto-complete', () => {
   assert.equal(run.distanceCap, null);
 });
 
-test('daily mode ends as "completed" once the distance cap is reached without a collision', () => {
+test('daily mode ends without reaching the cap when the player never steers away from center', () => {
   const run = new SwerveRun({ seed: 999, mode: 'daily', distanceCap: 50 });
-  // Keep dodging by always moving to a survivable lane before each tick;
-  // simplest robust approach for this test is to advance in small steps and
-  // steer onto an 'empty' or 'low'+jump/'high'+slide lane each time.
-  let dt = 0.05;
-  let guard = 0;
-  while (run.status === 'active' && guard < 100000) {
-    const outcome = run.tick(dt);
-    if (outcome.status !== 'active') break;
-    guard++;
-  }
-  // With such a tiny distanceCap (50, less than one ROW_SPACING of 40... wait
-  // 50 > 40, so exactly one row exists before the cap) and no evasive input,
-  // this run should end in a collision UNLESS lane 1 (center, the start lane)
-  // happens to be empty for row 0 of this seed - assert on whichever
-  // deterministically happens, rather than assuming either outcome.
-  const row0 = createRow(999, 0);
-  if (row0.lanes[1] === 'empty') {
-    assert.equal(run.completed, true);
-  } else {
+  stepUntil(run, 50);
+  const checkpoint0 = createCheckpoint(999, 0);
+  const centerIsHit = checkpoint0.obstacles.some((o) => {
+    const { x, y } = toXY(o);
+    return Math.hypot(x, y) < 0.14 + o.hitboxRadius; // player starts at (0,0)
+  });
+  if (centerIsHit) {
     assert.equal(run.status, 'ended');
+    assert.equal(run.completed, false);
+  } else {
+    assert.equal(run.completed, true);
   }
 });
 
-test('daily mode completes cleanly when the player successfully dodges every row', () => {
+test('daily mode completes cleanly when the player successfully dodges every checkpoint', () => {
   const seed = 999;
-  const distanceCap = 130; // covers rows at 40, 80, 120
+  const distanceCap = 130; // covers checkpoints at 40, 80, 120
   const run = new SwerveRun({ seed, mode: 'daily', distanceCap });
 
-  const dt = 0.02;
+  const dt = 1 / 60;
   let guard = 0;
+  let steeredForIndex = -1;
   while (run.status === 'active' && guard < 1000000) {
-    // Steer just before reaching each row: pick a lane the upcoming row can't
-    // punish regardless of action, or jump/slide appropriately.
-    const upcoming = createRow(seed, Math.floor(run.distance / ROW_SPACING));
-    const safeLane = upcoming.lanes.findIndex((t) => t === 'empty');
-    if (safeLane !== -1) {
-      run.lane = safeLane;
-    } else {
-      const jumpLane = upcoming.lanes.indexOf('low');
-      const slideLane = upcoming.lanes.indexOf('high');
-      if (jumpLane !== -1) {
-        run.lane = jumpLane;
-        run.jump();
-      } else if (slideLane !== -1) {
-        run.lane = slideLane;
-        run.slide();
-      } else {
-        // Only 'wall' remains possible in every lane but one, per the
-        // fairness guarantee - find that one.
-        const openLane = upcoming.lanes.findIndex((t) => t !== 'wall');
-        run.lane = openLane;
+    const nextIndex = Math.floor(run.distance / CHECKPOINT_SPACING);
+    if (nextIndex !== steeredForIndex) {
+      steeredForIndex = nextIndex;
+      const upcoming = createCheckpoint(seed, nextIndex);
+      const occupied = new Set(upcoming.obstacles.map(quadrantOf));
+      let clearQuadrant = 0;
+      for (let q = 0; q < 4; q++) {
+        if (!occupied.has(q)) { clearQuadrant = q; break; }
       }
+      const angle = (clearQuadrant + 0.5) * (Math.PI / 2);
+      run.setTargetPosition(Math.cos(angle) * 0.65, Math.sin(angle) * 0.65);
     }
     run.tick(dt);
     guard++;
@@ -288,30 +261,38 @@ test('daily mode completes cleanly when the player successfully dodges every row
   assert.equal(run.distance, distanceCap);
 });
 
-test('obstaclesCleared increments once per successfully passed row', () => {
+test('obstaclesCleared increments by the number of obstacles at each passed checkpoint', () => {
   const seed = 5;
+  const checkpoint0 = createCheckpoint(seed, 0);
+  if (checkpoint0.obstacles.length === 0) return; // skip rather than flake if this seed's checkpoint 0 is empty
+
+  const occupied = new Set(checkpoint0.obstacles.map(quadrantOf));
+  let clearQuadrant = -1;
+  for (let q = 0; q < 4; q++) {
+    if (!occupied.has(q)) { clearQuadrant = q; break; }
+  }
+  const angle = (clearQuadrant + 0.5) * (Math.PI / 2);
+
   const run = new SwerveRun({ seed, mode: 'practice' });
-  const row0 = createRow(seed, 0);
-  const safeLane = row0.lanes.findIndex((t) => t === 'empty');
-  if (safeLane === -1) return; // skip rather than flake if this seed's row 0 has no empty lane
-  run.lane = safeLane;
-  const dt = ROW_SPACING / speedAtDistance(0) + 0.01;
-  run.tick(dt);
-  assert.equal(run.obstaclesCleared, 1);
+  run.setTargetPosition(Math.cos(angle) * 0.65, Math.sin(angle) * 0.65);
+  stepUntil(run, CHECKPOINT_SPACING + 1);
+  assert.equal(run.status, 'active');
+  assert.equal(run.obstaclesCleared, checkpoint0.obstacles.length);
 });
 
-test('getVisibleRows returns exactly the unresolved rows within viewDistance, and is side-effect-free', () => {
+test('getVisibleObstacles returns exactly the unresolved obstacles within viewDistance, and is side-effect-free', () => {
   const run = new SwerveRun({ seed: 3, mode: 'practice' });
   const viewDistance = 100;
-  const expectedCount = Math.floor(viewDistance / ROW_SPACING);
+  const expectedCheckpointCount = Math.floor(viewDistance / CHECKPOINT_SPACING);
+  const expectedCount = Array.from({ length: expectedCheckpointCount }, (_, i) => createCheckpoint(3, i))
+    .reduce((sum, c) => sum + c.obstacles.length, 0);
 
-  const rows = run.getVisibleRows(viewDistance);
-  assert.equal(rows.length, expectedCount);
-  rows.forEach((row, i) => assert.equal(row.rowIndex, i));
+  const obstacles = run.getVisibleObstacles(viewDistance);
+  assert.equal(obstacles.length, expectedCount);
 
-  // Calling it again must return the identical rows - no internal state
+  // Calling it again must return identical obstacles - no internal state
   // should have advanced just from looking ahead.
-  const rowsAgain = run.getVisibleRows(viewDistance);
-  assert.deepEqual(rows, rowsAgain);
+  const obstaclesAgain = run.getVisibleObstacles(viewDistance);
+  assert.deepEqual(obstacles, obstaclesAgain);
   assert.equal(run.distance, 0);
 });

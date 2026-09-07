@@ -19,7 +19,7 @@ import {
 import { buildShareText, shareResult, checkpointStripFor, dayIndexFromUtcDate } from './share.js';
 import { playCue, unlockAudio } from './audio.js';
 import { drawFrame } from './render.js';
-import { listenForGestures } from './input.js';
+import { listenForSteering } from './input.js';
 import { track, getRecentEvents } from './analytics.js';
 
 const RESULT_TRANSITION_DELAY_MS = 380;
@@ -173,8 +173,9 @@ let activeRun = null;
 let lastFramePerfMs = null;
 let runStartPerfMs = null;
 let rafId = null;
-let unsubscribeInput = null;
+let steeringInput = null;
 let showFirstRunHint = false;
+const boostButton = document.getElementById('boost-btn');
 
 function setupCanvasResolution() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -204,14 +205,17 @@ function startRun(mode) {
   showScreen('run');
   updateHud();
 
-  if (unsubscribeInput) unsubscribeInput();
-  // Listens on the whole run screen, not just the canvas rectangle, so the
-  // HUD margins and hint-text area are swipeable too, not just the track itself.
-  unsubscribeInput = listenForGestures(screens.run, {
-    onLeft: () => handleAction(() => activeRun.moveLeft(), 'laneChange'),
-    onRight: () => handleAction(() => activeRun.moveRight(), 'laneChange'),
-    onJump: () => handleAction(() => activeRun.jump(), 'jump'),
-    onSlide: () => handleAction(() => activeRun.slide(), 'slide'),
+  if (steeringInput) steeringInput.destroy();
+  // Pointer tracking listens on the whole run screen, not just the canvas
+  // rectangle, so the HUD margins and hint-text area are draggable too - but
+  // the drag position still maps into the canvas's own coordinate frame (see
+  // input.js), so steering feels consistent regardless of where on screen a
+  // drag started.
+  steeringInput = listenForSteering({
+    pointerElement: screens.run,
+    canvasElement: canvas,
+    boostButtonElement: boostButton,
+    onBoost: handleBoost,
   });
 
   if (rafId) cancelAnimationFrame(rafId);
@@ -222,32 +226,39 @@ function updateHud() {
   document.getElementById('hud-distance').textContent = `${Math.round(activeRun.distance)}m`;
 }
 
-function handleAction(applyAction, cueName) {
-  if (!activeRun || activeRun.status !== 'active') return;
-  unlockAudio();
-  applyAction();
-  playCue(cueName, settings);
-
+function dismissFirstRunHint() {
   if (showFirstRunHint) {
     showFirstRunHint = false;
     document.getElementById('run-hint').hidden = true;
   }
 }
 
+function handleBoost() {
+  if (!activeRun || activeRun.status !== 'active') return;
+  unlockAudio();
+  activeRun.triggerBoost();
+  playCue('boost', settings);
+  dismissFirstRunHint();
+}
+
 function renderLoop(nowPerf) {
   if (!activeRun) return;
   // Clamped so a backgrounded/throttled tab resuming after a long gap can't
-  // hand the simulation a huge dt and skip straight past several rows.
+  // hand the simulation a huge dt and skip straight past several checkpoints.
   const dtSeconds = Math.min((nowPerf - lastFramePerfMs) / 1000, 0.1);
   lastFramePerfMs = nowPerf;
+
+  const target = steeringInput.advance(dtSeconds);
+  activeRun.setTargetPosition(target.x, target.y);
+  if ((target.x !== 0 || target.y !== 0) && showFirstRunHint) dismissFirstRunHint();
 
   const outcome = activeRun.tick(dtSeconds);
 
   drawFrame(ctx, canvasLogicalSize, {
-    lane: outcome.lane,
-    action: outcome.action,
+    position: outcome.position,
+    boosting: outcome.boosting,
     distance: outcome.distance,
-    visibleRows: activeRun.getVisibleRows(VIEW_DISTANCE),
+    visibleObstacles: activeRun.getVisibleObstacles(VIEW_DISTANCE),
     reduceMotion: settings.reduceMotion,
   });
 
@@ -258,9 +269,9 @@ function renderLoop(nowPerf) {
   }
 
   rafId = null;
-  if (unsubscribeInput) {
-    unsubscribeInput();
-    unsubscribeInput = null;
+  if (steeringInput) {
+    steeringInput.destroy();
+    steeringInput = null;
   }
   playCue(outcome.completed ? 'milestone' : 'collision', settings);
   setTimeout(() => finishRun(outcome), RESULT_TRANSITION_DELAY_MS);
@@ -269,9 +280,9 @@ function renderLoop(nowPerf) {
 function voidCurrentRun() {
   // Backgrounding/navigating away mid-run discards it without penalty - not
   // scored as a collision, not saved anywhere.
-  if (unsubscribeInput) {
-    unsubscribeInput();
-    unsubscribeInput = null;
+  if (steeringInput) {
+    steeringInput.destroy();
+    steeringInput = null;
   }
   if (rafId) {
     cancelAnimationFrame(rafId);

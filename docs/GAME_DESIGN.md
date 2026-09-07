@@ -16,13 +16,21 @@
 > document intentionally mirrors the original's section numbering (§1.9,
 > §1.12, §3-4, §5.5, etc.) because those exact references are cited in code
 > comments across `game/src/`.
+>
+> **Second revision note:** the first Swerve build (a 3-lane, swipe-to-snap
+> runner) turned out not to actually resemble Dookey Dash once compared
+> against real research on that game (see `RESEARCH.md`'s Dookey Dash
+> addendum) — the real game has no lanes at all; it's continuous 2D steering
+> within a circular tunnel cross-section, viewed from a 3rd-person chase
+> camera, with a boost as the one special move (no jump/slide). This document
+> now describes that corrected design, which is what's actually implemented.
 
 ## 0. Product Identity
 
 - **Name:** Swerve
-- **One-line pitch:** An endless 3-lane obstacle dash with a daily seeded
-  course everyone in the world runs at the same time — dodge, jump, and slide
-  your way as far as you can.
+- **One-line pitch:** An endless tunnel dash with a daily seeded course
+  everyone in the world runs at the same time — steer, dodge, and boost your
+  way as far as you can.
 - **Genre:** Hyper-casual endless runner / reflex-dodge.
 - **Platform:** Mobile-first responsive web (PWA), installable, offline-capable.
 - **Session length:** 15 seconds to a few minutes per run, designed for
@@ -33,13 +41,14 @@
 
 ### 1.1 Core Loop (single run, 15 seconds – a few minutes)
 
-The player character auto-runs forward down a 3-lane track. A steady stream
-of obstacle rows scrolls toward the player. For each row, the player must
-either be in a lane the row leaves clear, or take the correct action (jump
-over a low obstacle, slide under a high one) in the lane they're in. Missing
-either — wrong lane against a wall, or the wrong/no action against a
-low/high obstacle — ends the run immediately. There is no partial credit and
-no lives: one mistake ends the run, matching the "high fairness, high
+The player is auto-scrolled forward down an endless tunnel, free to steer
+continuously anywhere within its circular cross-section (not locked to
+lanes). A steady stream of checkpoints scrolls toward the player, each
+holding zero to a few obstacles floating at various positions within that
+cross-section. Colliding with an obstacle the player hasn't cleared — a
+hazard (never clearable, must be steered around) or a barrier (clearable
+only while boosting) — ends the run immediately. There is no partial credit
+and no lives: one mistake ends the run, matching the "high fairness, high
 stakes" feel of the genre.
 
 ### 1.2 Meta Loop (across runs and days)
@@ -55,18 +64,25 @@ stakes" feel of the genre.
 
 ### 1.3 Controls
 
-Swipe left/right to change lanes, swipe up (or a plain tap) to jump, swipe
-down to slide. The whole Run screen is the input surface, not just the
-canvas rectangle, so HUD margins and hint text are gesture-active too.
-Arrow keys / WASD / space are wired as a full keyboard-only alternative (see
-`input.js`), both for desktop play and as a motor-accessibility path that
-doesn't require a touchscreen swipe gesture at all.
+Drag (touch or mouse) to steer: the player's position eases continuously
+toward wherever the pointer currently is, via exponential smoothing
+(`STEER_EASE_RATE`), not an instant snap — this is a real analog-feeling
+steer, not a discrete gesture-per-move like a lane-swap runner. A dedicated
+on-screen boost button (plus Space/Shift on keyboard) triggers a timed
+boost: faster forward speed, sloppier steering (`BOOST_STEER_MULTIPLIER`),
+and the only way through a barrier obstacle. The whole Run screen is the
+drag surface, not just the canvas rectangle, but the drag position always
+maps into the canvas's own coordinate frame, so steering feels consistent
+regardless of where on screen a drag started. Arrow keys / WASD continuously
+move the steering target while held, as a full keyboard-only alternative
+(see `input.js`), both for desktop play and as a motor-accessibility path
+that doesn't require a touchscreen drag gesture at all.
 
 ### 1.4 Rules & Win/Loss
 
-- Loss: the player's current lane, at the exact distance an obstacle row is
-  reached, holds an obstacle the player's current action doesn't clear. See
-  `clears()` in `game.js` for the exact obstacle/action matrix.
+- Loss: at the exact distance a checkpoint is reached, the player's current
+  position overlaps an obstacle their current boost state doesn't clear. See
+  `clears()` in `game.js` for the exact obstacle/boost-state matrix.
 - A **Daily Run** win is reaching `DAILY_DISTANCE_CAP` while still active.
 - **Practice** has no win condition — it's an open-ended high-score chase
   that ends only in a collision.
@@ -75,12 +91,13 @@ doesn't require a touchscreen swipe gesture at all.
 
 Distance traveled is the score. Scroll speed ramps linearly from
 `BASE_SPEED` (6 units/sec) to a hard plateau `MAX_SPEED` (16 units/sec) over
-`SPEED_RAMP_DISTANCE` (1600 units), then never increases further — so a
-skilled player can sustain an arbitrarily long Practice run rather than
-facing a guaranteed-unwinnable ramp. `VIEW_DISTANCE` (100 units) is the
-fairness-critical constant: at max speed that's still roughly six seconds of
-visible warning before an obstacle arrives, comfortably above human reaction
-time.
+`SPEED_RAMP_DISTANCE` (1600 units), then never increases further outside a
+boost — so a skilled player can sustain an arbitrarily long Practice run
+rather than facing a guaranteed-unwinnable ramp. `VIEW_DISTANCE` (100 units)
+is the fairness-critical constant: at max speed that's still roughly six
+seconds of visible warning before an obstacle arrives, comfortably above
+human reaction time and far more than enough time to steer anywhere in the
+tunnel's cross-section given the steering ease rate.
 
 ### 1.6 Session & Mode Structure
 
@@ -90,19 +107,20 @@ mode at MVP — see `PRODUCT_PLAN.md`'s Prioritization for what's deferred.
 
 ### 1.7 Randomization & Content Generation
 
-Every obstacle row is generated deterministically from a seed via
-`mulberry32` + a per-row `childSeed` derivation (`rng.js`), so a given seed
-always produces the exact same sequence of rows. This is what makes the
-Daily Run identical for every player on a given UTC date, and what makes the
-run simulation exactly reproducible for testing.
+Every checkpoint's obstacles are generated deterministically from a seed via
+`mulberry32` + a per-checkpoint `childSeed` derivation (`rng.js`), so a given
+seed always produces the exact same sequence of checkpoints. This is what
+makes the Daily Run identical for every player on a given UTC date, and what
+makes the run simulation exactly reproducible for testing.
 
-**The fairness guarantee** lives in `createRow()` (`game.js`): each row
-independently weights its three lanes between empty/low/high/wall, but if
-random weighting would produce a row where every lane is an unclearable
-wall, the last lane is deterministically demoted to a jumpable "low"
-obstacle. This guarantees at least one survivable choice exists in every row,
-regardless of the player's current lane or action state — verified
-exhaustively by a 500-seed × 20-row sweep in `game.test.js`, not just argued
+**The fairness guarantee** lives in `createCheckpoint()` (`game.js`): the
+tunnel's circular cross-section is divided into 4 quadrants, and at most 3
+of them may hold an obstacle — the 4th is always left completely clear, so a
+full quarter of the tunnel (any radius, that quadrant's whole 90° arc) is
+always a safe, reachable escape route regardless of where the player
+currently is or what they're mid-boost doing. This guarantees at least one
+survivable path exists at every checkpoint — verified exhaustively by a
+500-seed × 20-checkpoint sweep in `game.test.js`, not just argued
 probabilistically.
 
 ### 1.8 Progression, Rewards, Unlocks, Achievements
@@ -142,8 +160,8 @@ complex emoji, for maximum copy-paste compatibility across chat apps (see
 
 Audio (synthesized Web Audio tones, no licensed samples) and haptics
 (Vibration API) are pure enhancement. Every gameplay-critical signal —
-which lane you're in, what's ahead, whether you're jumping/sliding/running —
-is already fully conveyed visually. A missing/blocked `AudioContext` or an
+where you are in the tunnel, what's ahead, whether you're boosting — is
+already fully conveyed visually. A missing/blocked `AudioContext` or an
 unsupported Vibration API must never break the game, only quiet it (see
 `audio.js`).
 
@@ -151,8 +169,8 @@ unsupported Vibration API must never break the game, only quiet it (see
 
 Backgrounding or navigating away mid-run discards it without penalty — it is
 not scored as a collision and never saved to Journal or streak state. There
-is no explicit pause control; a single gesture vocabulary (lane/jump/slide)
-has no natural "pause" gesture to spare, so backgrounding *is* the pause/quit
+is no explicit pause control; the steer/boost input vocabulary has no
+natural "pause" gesture to spare, so backgrounding *is* the pause/quit
 action (see `main.js`'s `voidCurrentRun`).
 
 ### 1.14 Offline Behavior
@@ -173,8 +191,8 @@ flow, leaderboard screen, or store screen.
 
 ### 2.2 Onboarding — Zero Text, Progressive Disclosure
 
-A first-time player sees a single one-line hint ("Swipe to dodge, jump, or
-slide") on their very first run only, cleared the moment they make their
+A first-time player sees a single one-line hint ("Drag to steer · tap ⚡ to
+boost") on their very first run only, cleared the moment they make their
 first input. No tutorial screen, no forced walkthrough.
 
 ### 2.3 Information Architecture
@@ -186,20 +204,23 @@ combo, or timer competing for attention while dodging.
 
 ### 2.4 Microinteractions
 
-Lane changes, jumps, and slides are instantaneous state changes reflected
-immediately in both the render and the corresponding audio/haptic cue,
-never gated behind a CSS transition that could desync from the actual
-collision-relevant game state.
+Steering is a continuous, live-updating render every frame, never gated
+behind a CSS transition. Boosting triggers an immediate visual (a glow
+around the player) and audio/haptic cue, reflected the instant the input
+fires, so it never desyncs from the actual collision-relevant game state.
 
 ## 3. Visual Design System
 
 ### 3.1 Principles
 
 Minimalist geometric: flat shapes and silhouettes, no illustrated character,
-no textures beyond the deliberate diagonal-stripe pattern on wall obstacles.
-Every obstacle type must be distinguishable by shape and position alone,
+no textures. Every obstacle type must be distinguishable by shape alone,
 never by color alone (colorblind-safe by construction, not by an add-on
-mode — see §4).
+mode — see §4). The camera itself is a pseudo-3D chase view down a receding
+tunnel (see §3.6) — a real perspective-divide projection drawn with plain 2D
+canvas primitives (arcs, lines, simple polygons), not a 3D engine or any
+textured/lit rendering, so the "minimalist geometric" mandate extends to the
+camera trick itself, not just to individual sprites.
 
 ### 3.2 Color
 
@@ -220,41 +241,50 @@ renders in its own native, most-legible system face.
 
 ### 3.4 Iconography & Shape Language
 
-Three obstacle silhouettes, each shape-distinct regardless of color: a
-short rounded hurdle at ground level (jump over), a suspended bar with
-visible clearance beneath it (slide under), and a full-height diagonally-
-striped block (change lanes — never clearable by action). The player is a
-plain rounded square that visibly compresses when sliding and lifts with a
-ground shadow when jumping.
+Two obstacle silhouettes, each shape-distinct regardless of color: a
+spinning 4-pointed cross for a hazard (never clearable — must be steered
+around), and a plain rectangular plank for a barrier (clearable only while
+boosting). The player is a plain rounded square that gains a soft glow when
+boosting.
 
 ### 3.5 Spacing & Layout
 
 The run canvas is a fixed 3:5 portrait aspect ratio regardless of viewport,
-so lane geometry and obstacle timing read identically across phone sizes;
+so tunnel geometry and obstacle timing read identically across phone sizes;
 everything else uses the shared 8/16/24/40px spacing scale defined as CSS
 custom properties.
 
 ### 3.6 Motion Design
 
-The lane-divider dash pattern scrolls proportionally to distance traveled,
-so speed is visually legible even during an obstacle-free stretch. Under
-Reduce Motion, this scroll is frozen (its distance information is
-secondary, not safety-critical) while the underlying gameplay is unaffected.
+The camera is a pseudo-3D chase view: a perspective-divide projection
+(`scale = CAMERA_Z / (CAMERA_Z + aheadDistance)`) maps every obstacle's
+tunnel-relative position and the tunnel's own concentric depth rings onto
+screen space, so distant obstacles shrink toward a vanishing point near the
+top of the screen and grow as they approach — a real "flying down a tube"
+depth cue built entirely from 2D canvas arcs and lines, not a 3D engine (see
+`render.js`). The tunnel's depth-ring phase scrolls proportionally to
+distance traveled, so speed is visually legible even during an
+obstacle-free stretch. Under Reduce Motion, that scroll is frozen and
+obstacle spin animation is disabled (this information is secondary, not
+safety-critical) while the underlying gameplay and the boost glow indicator
+remain fully visible.
 
 ## 4. Eye-Comfort & Accessibility Specification
 
-- **Colorblind-safe by construction:** every obstacle type differs in shape
-  and screen position (ground-level hurdle vs. suspended bar vs. full-height
-  striped wall), never by hue alone. An earlier draft added a separate
-  "Colorblind-Safe Mode" toggle with just a canvas outline; it was removed
-  entirely once the shape/position encoding above made it redundant dead
+- **Colorblind-safe by construction:** the two obstacle types differ in
+  shape (spinning cross vs. plank), never by hue alone. An earlier draft
+  added a separate "Colorblind-Safe Mode" toggle with just a canvas outline;
+  it was removed entirely once shape-based encoding made it redundant dead
   weight rather than a real accessibility feature.
-- **Reduce Motion:** a dedicated setting disables the lane-scroll animation
-  and all CSS transitions app-wide, independent of the OS-level
-  `prefers-reduced-motion` media query (which is also honored automatically).
-- **Keyboard alternative:** arrow keys / WASD / space fully replace swipe
-  gestures (`input.js`), for players who can't or don't want to use touch
-  gestures.
+- **Reduce Motion:** a dedicated setting disables the tunnel's depth-ring
+  scroll, obstacle spin, and all CSS transitions app-wide, independent of
+  the OS-level `prefers-reduced-motion` media query (which is also honored
+  automatically). The boost glow stays a static (non-pulsing) indicator
+  under this setting rather than disappearing, so boost state is never
+  conveyed by animation alone.
+- **Keyboard alternative:** arrow keys / WASD continuously steer, and
+  Space/Shift boosts, fully replacing drag gestures (`input.js`), for
+  players who can't or don't want to use touch/pointer input.
 - **Contrast:** every UI and obstacle color is verified against WCAG AA
   numerically (§3.2), in both light and dark themes.
 
@@ -267,12 +297,12 @@ gameplay-critical information (§1.12).
 
 ### 5.2 Cue Design
 
-Five cues, each with a distinct timbre matching its action's feel: a quick
-rising triangle-wave hop for jump, a falling sine whoosh for slide, a
-subtle short blip for lane changes (kept quiet since it can fire rapidly), a
-soft low thud for a collision (deliberately not harsh — this happens at the
-end of every run, including a first-ever one), and an ascending arpeggio for
-completing a Daily Run (`audio.js`).
+Three cues, each with a distinct timbre matching its meaning: a quick rising
+sawtooth surge for boost, a soft low thud for a collision (deliberately not
+harsh — this happens at the end of every run, including a first-ever one),
+and an ascending arpeggio for completing a Daily Run (`audio.js`). Steering
+itself is continuous and silent - there's no discrete "move" event left to
+cue, unlike a lane-swap runner's per-move blip.
 
 ### 5.3 Music Strategy
 

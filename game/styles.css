@@ -250,6 +250,29 @@ body {
   touch-action: none;
 }
 
+.boost-btn {
+  position: absolute;
+  bottom: var(--space-4);
+  right: var(--space-3);
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.boost-btn:active {
+  transform: scale(0.94);
+  background: var(--accent-primary);
+  color: var(--accent-primary-text);
+}
+
 .run-hint {
   position: absolute;
   bottom: var(--space-4);

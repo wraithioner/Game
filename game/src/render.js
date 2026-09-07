@@ -1,11 +1,25 @@
-// Canvas rendering for the 3-lane track. Purely visual - collision truth
-// lives entirely in game.js; this only ever reads state, never decides
-// outcomes. Colors are read live from the page's CSS custom properties
-// (styles.css) rather than duplicated here, so there is exactly one place
-// the palette is defined (docs/PRODUCT_PLAN.md - Technical Architecture
-// explains why, from a bug this caused in the previous concept).
+// Canvas rendering for the tunnel. Purely visual - collision truth lives
+// entirely in game.js; this only ever reads state, never decides outcomes.
+// Colors are read live from the page's CSS custom properties (styles.css)
+// rather than duplicated here, so there is exactly one place the palette is
+// defined (docs/PRODUCT_PLAN.md - Technical Architecture explains why, from
+// a bug this caused in an earlier build).
+//
+// The view is a pseudo-3D chase camera looking down a receding tunnel - a
+// real perspective-divide projection (scale = CAMERA_Z / (CAMERA_Z + depth))
+// drawn with plain 2D canvas primitives (arcs, lines, simple polygons), not
+// a 3D engine. This matches the real Dookey Dash's camera framing (see
+// docs/RESEARCH.md's research addendum) while staying within the minimalist
+// geometric mandate - no textures, no lighting, just projected flat shapes.
 
-import { LANES, VIEW_DISTANCE } from './game.js';
+const CAMERA_Z = 25; // perspective-divide constant: larger = flatter/less dramatic depth
+const VANISH_Y_FRAC = 0.22; // vanishing point Y, as a fraction of canvas height
+const NEAR_Y_FRAC = 0.88; // the player's fixed on-screen Y, as a fraction of canvas height
+const NEAR_RADIUS_FRAC = 0.42; // tunnel's on-screen radius at the player's depth, as a fraction of width
+const TUNNEL_RING_SPACING = 20; // distance units between drawn depth rings
+const TUNNEL_SPOKE_COUNT = 8;
+const OBSTACLE_BASE_RADIUS_FRAC = 0.16; // obstacle drawn size at the near plane, as a fraction of width
+const PLAYER_BASE_RADIUS_FRAC = 0.09;
 
 export function getPalette() {
   const styles = getComputedStyle(document.documentElement);
@@ -14,131 +28,147 @@ export function getPalette() {
     bg: token('--bg'),
     track: token('--ring'),
     player: token('--accent-primary'),
-    low: token('--accent-true'), // amber - jump over
-    high: token('--accent-fair'), // blue - slide under
-    wall: token('--accent-danger'), // violet - change lanes, never clearable by action
+    hazard: token('--accent-danger'), // violet - never clearable, must be steered around
+    barrier: token('--accent-true'), // amber - clearable only while boosting
     text: token('--text'),
   };
+}
+
+/** Perspective-divide projection: 1 right at the camera, shrinking toward 0
+ * as depth increases. Also used to interpolate Y between the vanishing
+ * point and the near (player) plane at the same depth. */
+function projectionScale(aheadDistance) {
+  return CAMERA_Z / (CAMERA_Z + Math.max(aheadDistance, 0));
 }
 
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {{width: number, height: number}} size - logical (CSS pixel) canvas size
- * @param {{lane: number, action: string, distance: number, visibleRows: object[], reduceMotion: boolean}} state
+ * @param {{position: {x:number,y:number}, boosting: boolean, distance: number, visibleObstacles: object[], reduceMotion: boolean}} state
  */
 export function drawFrame(ctx, size, state) {
-  const { lane, action, distance, visibleRows, reduceMotion } = state;
+  const { position, boosting, distance, visibleObstacles, reduceMotion } = state;
   const palette = getPalette();
   const { width, height } = size;
-  const laneWidth = width / LANES;
-  const playerY = height * 0.78;
-  const pixelsPerUnit = playerY / VIEW_DISTANCE;
+  const centerX = width / 2;
+  const vanishY = height * VANISH_Y_FRAC;
+  const nearY = height * NEAR_Y_FRAC;
+  const nearRadiusPx = width * NEAR_RADIUS_FRAC;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, width, height);
 
-  drawLaneDividers(ctx, palette, width, height, laneWidth, distance, reduceMotion);
+  drawTunnel(ctx, palette, centerX, vanishY, nearY, nearRadiusPx, distance, reduceMotion);
 
-  for (const row of visibleRows) {
-    const rowY = playerY - (row.position - distance) * pixelsPerUnit;
-    if (rowY < -60 || rowY > height + 60) continue;
-    row.lanes.forEach((type, i) => {
-      if (type === 'empty') return;
-      drawObstacle(ctx, palette, type, i * laneWidth, rowY, laneWidth);
-    });
+  // Farthest obstacles first, so nearer ones correctly draw on top of them.
+  const sorted = [...visibleObstacles].sort((a, b) => b.position - a.position);
+  for (const obstacle of sorted) {
+    const aheadDistance = obstacle.position - distance;
+    const scale = projectionScale(aheadDistance);
+    const depthY = vanishY + (nearY - vanishY) * scale;
+    const radiusPx = nearRadiusPx * scale;
+    const ox = Math.cos(obstacle.angle) * obstacle.radius;
+    const oy = Math.sin(obstacle.angle) * obstacle.radius;
+    const screenX = centerX + ox * radiusPx;
+    const screenY = depthY + oy * radiusPx;
+    const drawSize = width * OBSTACLE_BASE_RADIUS_FRAC * scale;
+    drawObstacle(ctx, palette, obstacle.type, screenX, screenY, drawSize, distance, reduceMotion);
   }
 
-  drawPlayer(ctx, palette, lane * laneWidth, playerY, laneWidth, action);
+  drawPlayer(ctx, palette, centerX + position.x * nearRadiusPx, nearY + position.y * nearRadiusPx, width * PLAYER_BASE_RADIUS_FRAC, boosting, reduceMotion);
 }
 
-function drawLaneDividers(ctx, palette, width, height, laneWidth, distance, reduceMotion) {
+function drawTunnel(ctx, palette, centerX, vanishY, nearY, nearRadiusPx, distance, reduceMotion) {
   ctx.strokeStyle = palette.track;
-  ctx.lineWidth = 2;
-  ctx.setLineDash([14, 18]);
-  // The dash offset scrolls with distance so the track visibly moves even
-  // during a straight, obstacle-free stretch - motion is capped/disabled
-  // under Reduce Motion rather than removed entirely, since it also carries
-  // real information (how fast you're currently going).
-  ctx.lineDashOffset = reduceMotion ? 0 : -((distance * 8) % 32);
-  for (let i = 1; i < LANES; i++) {
-    const x = i * laneWidth;
+  ctx.lineWidth = 1.5;
+
+  // Concentric depth rings, receding toward the vanishing point. The ring
+  // phase scrolls with distance so the tunnel visibly moves even during an
+  // obstacle-free stretch - frozen under Reduce Motion since it also carries
+  // real information (how fast you're currently going), same rationale as
+  // the lane-divider scroll in the previous build.
+  const phase = reduceMotion ? 0 : distance % TUNNEL_RING_SPACING;
+  for (let d = -phase; d <= 100; d += TUNNEL_RING_SPACING) {
+    if (d < 0) continue;
+    const scale = projectionScale(d);
+    const depthY = vanishY + (nearY - vanishY) * scale;
+    const radiusPx = nearRadiusPx * scale;
+    ctx.globalAlpha = 0.5 * scale + 0.15;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.arc(centerX, depthY, Math.max(radiusPx, 0.5), 0, Math.PI * 2);
     ctx.stroke();
   }
-  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Radial spokes from the vanishing point to the near-plane rim - a
+  // simplified but effective "converging lines" depth cue.
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < TUNNEL_SPOKE_COUNT; i++) {
+    const angle = (i / TUNNEL_SPOKE_COUNT) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, vanishY);
+    ctx.lineTo(centerX + Math.cos(angle) * nearRadiusPx, nearY + Math.sin(angle) * nearRadiusPx);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
-function drawObstacle(ctx, palette, type, laneX, rowY, laneWidth) {
-  const pad = laneWidth * 0.18;
-  const w = laneWidth - pad * 2;
-  ctx.fillStyle = palette[type];
+function drawObstacle(ctx, palette, type, x, y, size, distance, reduceMotion) {
+  ctx.save();
+  ctx.translate(x, y);
 
-  if (type === 'low') {
-    // A hurdle sitting at ground level - jump over it. Rounded top for a
-    // distinct silhouette, not just a plain block.
-    const h = laneWidth * 0.32;
-    roundRect(ctx, laneX + pad, rowY - h, w, h, [8, 8, 2, 2]);
+  if (type === 'hazard') {
+    // A spinning 4-pointed cross - the never-clearable hazard, distinct in
+    // both color and silhouette (a "danger" star shape) from the barrier.
+    if (!reduceMotion) ctx.rotate((distance * 0.06) % (Math.PI * 2));
+    ctx.fillStyle = palette.hazard;
+    drawCross(ctx, size);
+  } else {
+    // A plain rectangular "plank" - the boost-through barrier.
+    ctx.fillStyle = palette.barrier;
+    roundRect(ctx, -size, -size * 0.4, size * 2, size * 0.8, size * 0.15);
     ctx.fill();
-  } else if (type === 'high') {
-    // A bar suspended above the lane - slide under it. Drawn higher up
-    // with visible clearance beneath, so its silhouette alone (even in
-    // grayscale) reads differently from a ground-level hurdle.
-    const h = laneWidth * 0.22;
-    roundRect(ctx, laneX + pad, rowY - laneWidth * 0.85, w, h, 4);
-    ctx.fill();
-  } else if (type === 'wall') {
-    // Full-height block - only a lane change avoids it. Gets a distinct
-    // diagonal-stripe texture on top of its own hue, so the most dangerous
-    // obstacle type is never distinguished by color alone.
-    const h = laneWidth * 0.95;
-    const x = laneX + pad;
-    const y = rowY - h;
-    roundRect(ctx, x, y, w, h, 6);
-    ctx.fill();
+  }
 
+  ctx.restore();
+}
+
+function drawCross(ctx, size) {
+  const arm = size * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(-arm, -size);
+  ctx.lineTo(arm, -size);
+  ctx.lineTo(arm, -arm);
+  ctx.lineTo(size, -arm);
+  ctx.lineTo(size, arm);
+  ctx.lineTo(arm, arm);
+  ctx.lineTo(arm, size);
+  ctx.lineTo(-arm, size);
+  ctx.lineTo(-arm, arm);
+  ctx.lineTo(-size, arm);
+  ctx.lineTo(-size, -arm);
+  ctx.lineTo(-arm, -arm);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawPlayer(ctx, palette, x, y, size, boosting, reduceMotion) {
+  if (boosting) {
+    // A soft glow behind the player - static (not pulsing) under Reduce
+    // Motion, so the boost state stays visible without relying on animation.
     ctx.save();
-    roundRect(ctx, x, y, w, h, 6);
-    ctx.clip();
-    ctx.strokeStyle = palette.bg;
-    ctx.globalAlpha = 0.3;
-    ctx.lineWidth = 4;
-    const diagonal = w + h;
-    for (let d = -h; d < diagonal; d += 12) {
-      ctx.beginPath();
-      ctx.moveTo(x + d, y);
-      ctx.lineTo(x + d + h, y + h);
-      ctx.stroke();
-    }
+    ctx.globalAlpha = reduceMotion ? 0.35 : 0.35 + 0.15 * Math.sin(performance.now() / 60);
+    ctx.fillStyle = palette.player;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 1.8, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
-}
 
-function drawPlayer(ctx, palette, laneX, playerY, laneWidth, action) {
-  const cx = laneX + laneWidth / 2;
-  const baseSize = laneWidth * 0.5;
   ctx.fillStyle = palette.player;
-
-  if (action === 'jumping') {
-    // Airborne: smaller and lifted, with a soft ground shadow left behind so
-    // "in the air" reads clearly even as a static frame.
-    ctx.globalAlpha = 0.18;
-    ctx.beginPath();
-    ctx.ellipse(cx, playerY + baseSize * 0.35, baseSize * 0.4, baseSize * 0.12, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    roundRect(ctx, cx - baseSize * 0.32, playerY - baseSize * 1.15, baseSize * 0.64, baseSize * 0.64, 10);
-    ctx.fill();
-  } else if (action === 'sliding') {
-    // Flattened silhouette, low to the ground.
-    roundRect(ctx, cx - baseSize * 0.42, playerY - baseSize * 0.34, baseSize * 0.84, baseSize * 0.34, 8);
-    ctx.fill();
-  } else {
-    roundRect(ctx, cx - baseSize * 0.34, playerY - baseSize * 0.7, baseSize * 0.68, baseSize * 0.7, 10);
-    ctx.fill();
-  }
+  roundRect(ctx, x - size, y - size, size * 2, size * 2, size * 0.35);
+  ctx.fill();
 }
 
 function roundRect(ctx, x, y, w, h, radius) {

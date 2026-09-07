@@ -4,7 +4,11 @@
 // build session. Requires a static server for game/ running already.
 import { chromium } from 'playwright';
 
-const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8837';
+// ?debug=1 only adds a read-only introspection hook (see main.js) - it
+// doesn't change any gameplay behavior, so using it here to force a
+// deterministic collision (instead of hoping a random drag happens to hit
+// something) doesn't compromise this as a general smoke test.
+const BASE_URL = (process.env.BASE_URL || 'http://127.0.0.1:8837') + '/?debug=1';
 
 const errors = [];
 
@@ -30,26 +34,40 @@ await page.click('#play-practice');
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/02-run.png' });
 
-// Simulate a handful of blind taps (= jump) on the canvas at varying delays -
-// this deliberately does NOT dodge correctly, so a collision (ending the run)
-// is expected quickly. Skilled, obstacle-aware play is skilled-play.mjs's job.
+// Drag deliberately onto a real upcoming obstacle's exact position (a
+// naive/uncoordinated player wouldn't do this on purpose, but it's what lets
+// this smoke test collide deterministically rather than hoping a random
+// drag happens to hit something - obstacle-aware, correct dodging is
+// skilled-play.mjs's job, this script only needs SOME real collision to
+// verify the result screen and share flow). Waits exactly as long as the
+// real ramping speed says it should take to arrive, computed from the same
+// speedAtDistance the game itself uses (exposed on the debug hook), rather
+// than an arbitrary guess.
 const canvas = await page.$('#canvas');
 const box = await canvas.boundingBox();
-const cx = box.x + box.width / 2;
-const cy = box.y + box.height / 2;
+const canvasCenterX = box.x + box.width / 2;
+const canvasCenterY = box.y + box.height / 2;
 
-let endedNaturally = false;
-for (let i = 0; i < 40; i++) {
-  await page.mouse.click(cx, cy);
-  await page.waitForTimeout(120 + Math.floor(Math.random() * 400));
-  const resultVisible = await page.isVisible('#screen-result');
-  if (resultVisible) {
-    endedNaturally = true;
-    break;
-  }
-}
+const collisionPlan = await page.evaluate(() => {
+  const run = window.__swerveDebug.getRun();
+  const obstacle = run.getVisibleObstacles(300)[0];
+  const speed = window.__swerveDebug.speedAtDistance(run.distance);
+  return {
+    x: Math.cos(obstacle.angle) * obstacle.radius,
+    y: Math.sin(obstacle.angle) * obstacle.radius,
+    etaSeconds: (obstacle.position - run.distance) / speed,
+  };
+});
+const targetX = canvasCenterX + collisionPlan.x * (box.width / 2);
+const targetY = canvasCenterY + collisionPlan.y * (box.height / 2);
+await page.mouse.move(targetX, targetY);
+await page.mouse.down();
+await page.mouse.move(targetX, targetY, { steps: 3 });
+await page.waitForTimeout(Math.min(Math.max(collisionPlan.etaSeconds * 1000 + 700, 800), 20000));
+await page.mouse.up();
 
-console.log('Run ended naturally (a collision occurred within 40 taps):', endedNaturally);
+const endedNaturally = await page.isVisible('#screen-result');
+console.log('Run ended after steering onto an upcoming obstacle:', endedNaturally);
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/03-result.png' });
 
@@ -107,9 +125,12 @@ await page.waitForTimeout(100);
 await page.click('#play-daily');
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'qa/screenshots/06-daily-run.png' });
-// Tap once (= jump) to exercise input; the run is left active and mid-flight
-// here on purpose - the reload immediately below is itself the offline-check step.
-await page.mouse.click(cx, cy);
+// Drag once to exercise input; the run is left active and mid-flight here on
+// purpose - the reload immediately below is itself the offline-check step.
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+await page.mouse.down();
+await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2, { steps: 3 });
+await page.mouse.up();
 await page.waitForTimeout(200);
 
 console.log('--- Offline check ---');

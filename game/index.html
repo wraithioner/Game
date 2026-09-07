@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#15151a" />
-  <meta name="description" content="Swerve - a 3-lane endless obstacle dash with a daily seeded course for every player in the world." />
+  <meta name="description" content="Swerve - an endless tunnel dash with a daily seeded course for every player in the world. Steer, dodge, and boost as far as you can." />
   <title>Swerve</title>
   <link rel="canonical" href="https://wraithioner.github.io/Game/" />
   <link rel="manifest" href="manifest.json" />
@@ -18,14 +18,14 @@
        shared. -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Swerve" />
-  <meta property="og:description" content="Dodge, jump, and slide through an endless 3-lane obstacle course — the same daily course every player in the world faces at once." />
+  <meta property="og:description" content="Steer, dodge, and boost through an endless tunnel — the same daily course every player in the world faces at once." />
   <meta property="og:url" content="https://wraithioner.github.io/Game/" />
   <meta property="og:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Swerve" />
-  <meta name="twitter:description" content="Dodge, jump, and slide through an endless 3-lane obstacle course — the same daily course every player in the world faces at once." />
+  <meta name="twitter:description" content="Steer, dodge, and boost through an endless tunnel — the same daily course every player in the world faces at once." />
   <meta name="twitter:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
 </head>
 <body>
@@ -59,8 +59,9 @@
       <div class="hud">
         <span id="hud-distance"></span>
       </div>
-      <canvas id="canvas" width="480" height="800" aria-label="Swipe left or right to change lanes, up to jump, down to slide"></canvas>
-      <p class="run-hint" id="run-hint" hidden>Swipe to dodge, jump, or slide</p>
+      <canvas id="canvas" width="480" height="800" aria-label="Drag to steer through the tunnel"></canvas>
+      <button id="boost-btn" class="boost-btn" aria-label="Boost" type="button">⚡</button>
+      <p class="run-hint" id="run-hint" hidden>Drag to steer &middot; tap ⚡ to boost</p>
     </section>
 
     <section id="screen-result" class="screen" data-screen="result" hidden>

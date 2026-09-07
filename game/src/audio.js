@@ -47,17 +47,13 @@ function playTone(freqs, { duration = 0.12, type = 'sine', gain = 0.15 } = {}) {
 }
 
 const CUES = {
-  jump: () => playTone([440, 660], { duration: 0.09, type: 'triangle', gain: 0.13 }), // quick rising hop
-  slide: () => playTone([330, 220], { duration: 0.12, type: 'sine', gain: 0.12 }), // quick falling whoosh
-  laneChange: () => playTone([500], { duration: 0.04, type: 'sine', gain: 0.06 }), // subtle, since it can fire rapidly
+  boost: () => playTone([392, 587, 880], { duration: 0.1, type: 'sawtooth', gain: 0.11 }), // quick rising surge
   collision: () => playTone([180], { duration: 0.24, type: 'sine', gain: 0.12 }), // soft low thud, deliberately not harsh
   milestone: () => playTone([523.25, 659.25, 783.99, 1046.5], { duration: 0.11, type: 'triangle' }), // ascending arpeggio
 };
 
 const HAPTICS = {
-  jump: [10],
-  slide: [10],
-  laneChange: [6],
+  boost: [10, 20],
   collision: [30],
   milestone: [15, 40, 15, 40, 15],
 };
