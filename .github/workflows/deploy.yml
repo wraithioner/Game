@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; let an in-flight one finish rather than
+# cancelling it mid-upload.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the unit test suite before deploying
+        working-directory: game
+        run: npm test
+
+      - name: Stage only the runtime files (exclude qa/ scripts, package.json, node_modules)
+        run: |
+          mkdir -p site
+          cp game/index.html game/styles.css game/manifest.json game/sw.js game/robots.txt site/
+          cp -r game/src site/src
+          cp -r game/icons site/icons
+
+      - name: Version the service worker cache with this commit's SHA
+        # Ties cache invalidation to the deployed commit automatically, so a
+        # deploy that changes any cached file can never silently ship with a
+        # stale service worker cache because someone forgot to bump a version
+        # string by hand.
+        run: sed -i "s/ringtrue-dev/ringtrue-${GITHUB_SHA::8}/" site/sw.js
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

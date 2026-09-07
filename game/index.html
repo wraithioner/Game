@@ -6,12 +6,35 @@
   <meta name="theme-color" content="#15151a" />
   <meta name="description" content="Ringtrue - a one-tap precision timing game with a daily seeded challenge for every player in the world." />
   <title>Ringtrue</title>
+  <link rel="canonical" href="https://wraithioner.github.io/Game/" />
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Open Graph / Twitter card: this is what a pasted link looks like in a
+       chat app, which matters directly here since the whole retention/growth
+       hypothesis (docs/RESEARCH.md §11-14) rides on links to this game being
+       shared. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Ringtrue" />
+  <meta property="og:description" content="Tap the instant a sweeping pointer lines up with a shrinking target on a ring — the same ring every player in the world faces once a day." />
+  <meta property="og:url" content="https://wraithioner.github.io/Game/" />
+  <meta property="og:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Ringtrue" />
+  <meta name="twitter:description" content="Tap the instant a sweeping pointer lines up with a shrinking target on a ring — the same ring every player in the world faces once a day." />
+  <meta name="twitter:image" content="https://wraithioner.github.io/Game/icons/og-image.png" />
 </head>
 <body>
+  <noscript>
+    <p style="max-width:420px;margin:3rem auto;padding:0 1.5rem;font-family:system-ui,-apple-system,sans-serif;line-height:1.5;color:#2b2b2e;">
+      Ringtrue needs JavaScript to run — it's a real-time reflex game, and the timing itself is the whole point.
+      Please enable JavaScript for this page and reload.
+    </p>
+  </noscript>
   <div id="app">
 
     <section id="screen-home" class="screen" data-screen="home">

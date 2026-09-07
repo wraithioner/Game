@@ -2,7 +2,15 @@
 // Ring, which derives its seed from the device clock) needs zero network
 // access after first load - see docs/PRODUCT_PLAN.md - Technical Architecture.
 
-const CACHE_NAME = 'ringtrue-v2';
+// This placeholder is replaced with the deployed commit SHA by
+// .github/workflows/deploy.yml at deploy time, so every deploy that changes
+// any cached file automatically invalidates old clients' caches - forgetting
+// to bump a hardcoded version string by hand is a classic, easy-to-miss PWA
+// bug (users silently stuck on stale JS forever), so nothing here depends on
+// a human remembering to do it. Local development keeps this literal string,
+// which is fine - a developer testing sw.js changes locally already knows to
+// hard-reload/unregister the service worker between iterations.
+const CACHE_NAME = 'ringtrue-dev';
 const APP_SHELL = [
   './',
   './index.html',
